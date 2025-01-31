@@ -14,17 +14,17 @@ const client = new Client({
     ]
 });
 
-// 🔹 Replace with your Discord text channel ID
+// 🔹 Set your Discord text channel ID
 const TEXT_CHANNEL_ID = "1328094647938973768"; 
 
 let lastSentMessageId = null;
 const usersInVoice = {};
 
-// ✅ Fetch the latest message from the text channel (Fix JSON Parse Error)
+// ✅ Fetch the latest bot message (Fixes errors)
 async function fetchLatestMessage() {
     try {
         const channel = await client.channels.fetch(TEXT_CHANNEL_ID);
-        if (!channel) return console.error("⚠️ Discord channel not found!");
+        if (!channel) return console.error("⚠️ Channel not found!");
 
         const messages = await channel.messages.fetch({ limit: 10 });
         for (const message of messages.values()) {
@@ -39,21 +39,23 @@ async function fetchLatestMessage() {
     return {};
 }
 
-// ✅ Convert normal text message into a data object
-function parseMessageData(messageContent) {
-    const lines = messageContent.split("\n");
+// ✅ Convert normal text into a data object
+function parseMessageData(content) {
+    const lines = content.split("\n");
     let data = {};
 
     for (let line of lines) {
-        const match = line.match(/^🆔 (\d+): Total: (\d+)h (\d+)m \| Today: (\d+)h (\d+)m$/);
+        const match = line.match(/^🆔 (\d+) - (.+): Total Time: (\d+)h (\d+)m, Today: (\d+)h (\d+)m$/);
         if (match) {
             const userId = match[1];
-            const totalHours = parseInt(match[2]);
-            const totalMinutes = parseInt(match[3]);
-            const todayHours = parseInt(match[4]);
-            const todayMinutes = parseInt(match[5]);
+            const username = match[2];
+            const totalHours = parseInt(match[3]);
+            const totalMinutes = parseInt(match[4]);
+            const todayHours = parseInt(match[5]);
+            const todayMinutes = parseInt(match[6]);
 
             data[userId] = {
+                username,
                 total_time: totalHours * 3600 + totalMinutes * 60,
                 history: {
                     [new Date().toISOString().split("T")[0]]: todayHours * 3600 + todayMinutes * 60
@@ -64,26 +66,27 @@ function parseMessageData(messageContent) {
     return data;
 }
 
-// ✅ Convert data object into a formatted text message
+// ✅ Convert object to human-readable text message
 function formatDataMessage(userData) {
     let message = "📢 **Updated User Data:**\n";
     for (const userId in userData) {
-        const totalSeconds = userData[userId].total_time;
+        const user = userData[userId];
+        const totalSeconds = user.total_time;
         const today = new Date().toISOString().split("T")[0];
-        const todaySeconds = userData[userId].history[today] || 0;
+        const todaySeconds = user.history[today] || 0;
 
         const totalTime = `${Math.floor(totalSeconds / 3600)}h ${Math.floor((totalSeconds % 3600) / 60)}m`;
         const todayTime = `${Math.floor(todaySeconds / 3600)}h ${Math.floor((todaySeconds % 3600) / 60)}m`;
 
-        message += `🆔 ${userId}: Total: ${totalTime} | Today: ${todayTime}\n`;
+        message += `🆔 ${userId} - ${user.username}: Total Time: ${totalTime}, Today: ${todayTime}\n`;
     }
     return message;
 }
 
-// ✅ Update or send a message containing the latest voice time data
+// ✅ Send or update a message in the Discord text channel
 async function updateDiscordChannel(userData) {
     const channel = await client.channels.fetch(TEXT_CHANNEL_ID);
-    if (!channel) return console.error("⚠️ Discord channel not found!");
+    if (!channel) return console.error("⚠️ Channel not found!");
 
     let formattedText = formatDataMessage(userData);
 
@@ -103,7 +106,7 @@ async function updateDiscordChannel(userData) {
     }
 }
 
-// ✅ Handle when a user joins or leaves a voice channel
+// ✅ Track users joining/leaving voice channels
 client.on("voiceStateUpdate", async (oldState, newState) => {
     let userData = await fetchLatestMessage();
 
@@ -112,16 +115,16 @@ client.on("voiceStateUpdate", async (oldState, newState) => {
     const today = new Date().toISOString().split("T")[0];
 
     if (!userData[userId]) {
-        userData[userId] = { total_time: 0, history: {} };
+        userData[userId] = { username, total_time: 0, history: {} };
     }
 
-    // 🎤 User joins a voice channel (Start tracking)
+    // 🎤 User joins voice (Start timer)
     if (newState.channel && !usersInVoice[userId]) {
         usersInVoice[userId] = Date.now();
         console.log(`🎤 ${username} joined ${newState.channel.name}`);
     }
 
-    // 🚪 User leaves voice channel (Update time)
+    // 🚪 User leaves voice (Stop timer and update time)
     if (!newState.channel && usersInVoice[userId]) {
         const timeSpent = (Date.now() - usersInVoice[userId]) / 1000; 
         delete usersInVoice[userId]; 
@@ -136,7 +139,7 @@ client.on("voiceStateUpdate", async (oldState, newState) => {
     }
 });
 
-// ✅ `!alltime` Command: Show User's Total Time (Fix ID Not Found)
+// ✅ Command: `!alltime` - Show User's Total Time
 client.on("messageCreate", async (message) => {
     if (!message.content.startsWith("!") || message.author.bot) return;
 
@@ -176,7 +179,7 @@ client.once("ready", async () => {
     await updateDiscordChannel(await fetchLatestMessage());
 });
 
-// ✅ Start a simple Express Web Server (Prevents Render from stopping)
+// ✅ Start Express Web Server (Prevents Render from stopping)
 app.get("/", (req, res) => {
     res.send("Bot is running!");
 });
