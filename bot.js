@@ -28,7 +28,7 @@ const client = new Client({
 
 // ** JSONBin.io API Details **
 const DATA_FILE_URL = "https://api.jsonbin.io/v3/b/679c853fad19ca34f8f75ef5";
-const JSONBIN_API_KEY = "YOUR_JSONBIN_SECRET_KEY";  // Replace with your JSONBin.io Secret Key
+const JSONBIN_API_KEY = "$2a$10$3nHVwm24hUkehqjI701mi.ORM0rGSwojbSozuBoCxWhco7fu6dH6O";  // Replace with your JSONBin.io Secret Key
 
 // Fetch Data from JSONBin.io
 async function loadUserData() {
