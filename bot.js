@@ -125,7 +125,10 @@ async function showOwnerProfiles(interaction) {
     // Fetch members with the Owner role using the role ID
     const membersWithRole = guild.members.cache.filter((member) => member.roles.cache.has(OWNER_ROLE_ID));
     if (membersWithRole.size === 0) {
-        return interaction.reply("❌ No members found with the Owner role.");
+        return interaction.reply({
+            content: "❌ No members found with the Owner role.",
+            flags: 64, // Ephemeral response
+        });
     }
 
     const userData = await fetchUserData();
@@ -179,7 +182,7 @@ client.on("interactionCreate", async (interaction) => {
         if (!user) {
             return interaction.reply({
                 content: "❌ No data found for this user.",
-                ephemeral: true,
+                flags: 64, // Ephemeral response
             });
         }
 
@@ -215,7 +218,7 @@ client.on("interactionCreate", async (interaction) => {
         await interaction.reply({
             embeds: [embed],
             components: [actionRow],
-            ephemeral: true,
+            flags: 64, // Ephemeral response
         });
     }
 
@@ -228,7 +231,7 @@ client.on("interactionCreate", async (interaction) => {
         if (!user) {
             return interaction.reply({
                 content: "❌ No data found for this user.",
-                ephemeral: true,
+                flags: 64, // Ephemeral response
             });
         }
 
@@ -269,7 +272,7 @@ client.on("interactionCreate", async (interaction) => {
 
         await interaction.reply({
             embeds: [embed],
-            ephemeral: true,
+            flags: 64, // Ephemeral response
         });
     }
 });
@@ -307,7 +310,7 @@ app.get("/", (req, res) => {
 });
 
 app.listen(PORT, () => {
-    console.log(`🌐 Server is running on port ${PORT}`); // Fixed: Properly closed the template literal
+    console.log(`🌐 Server is running on port ${PORT}`);
 });
 
 // Log in to Discord
