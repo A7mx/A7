@@ -132,8 +132,8 @@ async function showOwnerProfiles(interaction) {
 
     // Create an embed with profile pictures and buttons
     const embed = new EmbedBuilder()
-        .setTitle("👥 Owners in the Server")
-        .setDescription("Click on a user's name to view their voice activity stats.")
+        .setTitle("👥 A7 AdminChecker | By @A7madShooter")
+        .setDescription("Click on The Name of Admin to see their voice activity stats.")
         .setColor("#0099ff");
 
     const buttons = [];
@@ -208,7 +208,7 @@ client.on("interactionCreate", async (interaction) => {
 
         const embed = new EmbedBuilder()
             .setTitle(`📊 Select a Timeframe for ${user.username}`)
-            .setDescription("Choose a timeframe to view voice activity stats.")
+            .setDescription("Here you view voice activity stats.")
             .setColor("#0099ff")
             .setThumbnail(interaction.guild.members.cache.get(userId)?.user.displayAvatarURL({ dynamic: true }));
 
