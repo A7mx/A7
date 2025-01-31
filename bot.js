@@ -71,7 +71,8 @@ client.on("voiceStateUpdate", async (oldState, newState) => {
             const timeSpent = (Date.now() - usersInVoice[userId]) / 1000; // Convert to seconds
             const today = new Date().toISOString().split("T")[0];
 
-            // Update history
+            // Ensure user history exists
+            ensureUserHistory(userTotalTime, userId);
             userTotalTime[userId].total_time += timeSpent;
             userTotalTime[userId].history[today] = (userTotalTime[userId].history[today] || 0) + timeSpent;
 
@@ -93,9 +94,9 @@ client.on("messageCreate", async (message) => {
         const user = message.mentions.users.first() || message.author;
         ensureUserHistory(userTotalTime, user.id);
 
-        const totalSeconds = userTotalTime[user.id].total_time || 0;
+        const totalSeconds = userTotalTime[user.id]?.total_time || 0;
         const today = new Date().toISOString().split("T")[0];
-        const dailySeconds = userTotalTime[user.id].history[today] || 0;
+        const dailySeconds = userTotalTime[user.id]?.history[today] || 0;
 
         const formatTime = (seconds) => {
             const h = Math.floor(seconds / 3600);
@@ -120,7 +121,7 @@ client.on("messageCreate", async (message) => {
 
         let report = `📅 **${user.username}'s Weekly Voice Time:**\n`;
         weekDays.forEach(day => {
-            const time = userTotalTime[user.id].history[day] || 0;
+            const time = userTotalTime[user.id]?.history[day] || 0;
             report += `📆 **${day}:** ${Math.floor(time / 3600)}h ${Math.floor((time % 3600) / 60)}m\n`;
         });
 
