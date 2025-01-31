@@ -3,7 +3,7 @@ const express = require("express");
 require("dotenv").config();
 
 const app = express();
-const PORT = process.env.PORT || 10000; // Keeps bot alive on Render
+const PORT = process.env.PORT || 10000;
 
 const client = new Client({
     intents: [
@@ -20,7 +20,7 @@ const TEXT_CHANNEL_ID = "1328094647938973768";
 let lastSentMessageId = null;
 const usersInVoice = {};
 
-// ✅ Fetch the latest message from the text channel
+// ✅ Fetch the latest message from the text channel (Fix JSON Parse Error)
 async function fetchLatestMessage() {
     try {
         const channel = await client.channels.fetch(TEXT_CHANNEL_ID);
@@ -32,9 +32,13 @@ async function fetchLatestMessage() {
                 lastSentMessageId = message.id;
                 const content = message.content.replace(/```json|```/g, "").trim();
                 
+                if (!content.startsWith("{")) {
+                    console.warn("⚠️ Invalid JSON detected, resetting data...");
+                    return {};
+                }
+
                 try {
-                    const parsedData = JSON.parse(content);
-                    return parsedData;
+                    return JSON.parse(content);
                 } catch (error) {
                     console.error("⚠️ JSON Parse Error: Message content is invalid JSON.");
                     return {};
@@ -83,28 +87,27 @@ client.on("voiceStateUpdate", async (oldState, newState) => {
     }
 
     // 🎤 User joins a voice channel (Start tracking)
-    if (newState.channel) {
-        if (!usersInVoice[userId]) {
-            usersInVoice[userId] = Date.now();
-            console.log(`🎤 ${username} joined ${newState.channel.name}`);
-        }
+    if (newState.channel && !usersInVoice[userId]) {
+        usersInVoice[userId] = Date.now();
+        console.log(`🎤 ${username} joined ${newState.channel.name}`);
     }
 
     // 🚪 User leaves voice channel (Update time)
     if (!newState.channel && usersInVoice[userId]) {
         const timeSpent = (Date.now() - usersInVoice[userId]) / 1000; 
-        usersInVoice[userId] = null; 
+        delete usersInVoice[userId]; 
 
-        userData[userId].total_time += timeSpent;
-        userData[userId].history[today] = (userData[userId].history[today] || 0) + timeSpent;
+        if (timeSpent > 10) { // Ignore if user left instantly
+            userData[userId].total_time += timeSpent;
+            userData[userId].history[today] = (userData[userId].history[today] || 0) + timeSpent;
 
-        console.log(`🚪 ${username} left voice channel. Time added: ${Math.floor(timeSpent / 60)} min`);
-
-        await updateDiscordChannel(userData);
+            console.log(`🚪 ${username} left voice channel. Time added: ${Math.floor(timeSpent / 60)} min`);
+            await updateDiscordChannel(userData);
+        }
     }
 });
 
-// ✅ `!alltime` Command: Show User's Total Time
+// ✅ `!alltime` Command: Show User's Total Time (Fix ID Not Found)
 client.on("messageCreate", async (message) => {
     if (!message.content.startsWith("!") || message.author.bot) return;
 
