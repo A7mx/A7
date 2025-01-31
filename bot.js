@@ -14,52 +14,57 @@ const client = new Client({
     ],
 });
 
-// 🔹 Set your Discord text channel ID (for tracking messages)
-const TEXT_CHANNEL_ID = "1328094647938973768";
+// 🔹 Set your Discord text channel IDs
+const TEXT_CHANNEL_ID = "1328094647938973768"; // For tracking messages
+const DATABASE_CHANNEL_ID = "1334150400143523872"; // For storing data
 let lastSentMessageId = null;
 const usersInVoice = {};
 
-// ✅ Fetch the latest bot message (Fixes errors)
-async function fetchLatestMessage() {
+// ✅ Fetch or initialize user data from the database channel
+async function fetchUserData() {
     try {
-        const channel = await client.channels.fetch(TEXT_CHANNEL_ID);
-        if (!channel) return console.error("⚠️ Channel not found!");
-        const messages = await channel.messages.fetch({ limit: 10 });
-        for (const message of messages.values()) {
-            if (message.author.id === client.user.id) {
-                lastSentMessageId = message.id;
-                return parseMessageData(message.content);
-            }
+        const channel = await client.channels.fetch(DATABASE_CHANNEL_ID);
+        if (!channel) return console.error("⚠️ Database channel not found!");
+
+        const messages = await channel.messages.fetch({ limit: 1 });
+        if (messages.size === 0) {
+            // No messages in the database channel, create a new one
+            const sentMessage = await channel.send("```json\n{}\n```");
+            return {};
+        }
+
+        const latestMessage = messages.first();
+        const content = latestMessage.content.trim();
+        if (content.startsWith("```json") && content.endsWith("```")) {
+            const jsonContent = content.slice(7, -3).trim();
+            return JSON.parse(jsonContent);
         }
     } catch (error) {
-        console.error("⚠️ Error fetching message:", error);
+        console.error("⚠️ Error fetching user data:", error);
     }
     return {};
 }
 
-// ✅ Convert normal text into a data object
-function parseMessageData(content) {
-    const lines = content.split("\n");
-    let data = {};
-    for (let line of lines) {
-        const match = line.match(/^🆔 (\d+) - (.+): Total Time: (\d+)h (\d+)m, Today: (\d+)h (\d+)m$/);
-        if (match) {
-            const userId = match[1];
-            const username = match[2];
-            const totalHours = parseInt(match[3]);
-            const totalMinutes = parseInt(match[4]);
-            const todayHours = parseInt(match[5]);
-            const todayMinutes = parseInt(match[6]);
-            data[userId] = {
-                username,
-                total_time: totalHours * 3600 + totalMinutes * 60,
-                history: {
-                    [new Date().toISOString().split("T")[0]]: todayHours * 3600 + todayMinutes * 60,
-                },
-            };
+// ✅ Save user data to the database channel
+async function saveUserData(userData) {
+    try {
+        const channel = await client.channels.fetch(DATABASE_CHANNEL_ID);
+        if (!channel) return console.error("⚠️ Database channel not found!");
+
+        const messages = await channel.messages.fetch({ limit: 1 });
+        const jsonContent = "```json\n" + JSON.stringify(userData, null, 2) + "\n```";
+
+        if (messages.size === 0) {
+            // No messages in the database channel, create a new one
+            await channel.send(jsonContent);
+        } else {
+            const latestMessage = messages.first();
+            await latestMessage.edit(jsonContent);
         }
+        console.log("✅ Saved user data to the database channel.");
+    } catch (error) {
+        console.error("⚠️ Error saving user data:", error);
     }
-    return data;
 }
 
 // ✅ Format data into a Discord embed
@@ -76,7 +81,7 @@ function formatDataEmbed(userData) {
         embed.addFields([
             {
                 name: `🆔 ${user.username}`,
-                value: `🕒 **Total:** ${Math.floor(totalSeconds / 3600)}h ${Math.floor((totalSeconds % 3600) / 60)}m\n📅 **Today:** ${Math.floor(todaySeconds / 3600)}h ${Math.floor((todaySeconds % 3600) / 60)}m`,
+                value: `🕒 **Total:** ${Math.floor(totalSeconds / 3600)}h ${Math.floor((totalSeconds % 3600) / 60)}m ${totalSeconds % 60}s\n📅 **Today:** ${Math.floor(todaySeconds / 3600)}h ${Math.floor((todaySeconds % 3600) / 60)}m ${todaySeconds % 60}s`,
                 inline: false,
             },
         ]);
@@ -85,7 +90,8 @@ function formatDataEmbed(userData) {
 }
 
 // ✅ Send or update a message in the Discord text channel
-async function updateDiscordChannel(userData) {
+async function updateDiscordChannel() {
+    const userData = await fetchUserData();
     const channel = await client.channels.fetch(TEXT_CHANNEL_ID);
     if (!channel) return console.error("⚠️ Channel not found!");
     let embed = formatDataEmbed(userData);
@@ -112,28 +118,37 @@ async function updateDiscordChannel(userData) {
 
 // ✅ Track users joining/leaving voice channels
 client.on("voiceStateUpdate", async (oldState, newState) => {
-    let userData = await fetchLatestMessage();
     const userId = newState.member?.id || oldState.member?.id;
     const username = newState.member?.user?.username || oldState.member?.user?.username;
-    const today = new Date().toISOString().split("T")[0];
-    if (!userData[userId]) {
-        userData[userId] = { username, total_time: 0, history: {} };
-    }
+    if (!userId || !username) return;
+
+    let userData = await fetchUserData();
+
     // 🎤 User joins voice (Start timer)
     if (newState.channel && !usersInVoice[userId]) {
         usersInVoice[userId] = Date.now();
         console.log(`🎤 ${username} joined ${newState.channel.name}`);
     }
+
     // 🚪 User leaves voice (Stop timer and update time)
     if ((!newState.channel && oldState.channel) && usersInVoice[userId]) {
         const timeSpent = (Date.now() - usersInVoice[userId]) / 1000;
         delete usersInVoice[userId];
         if (timeSpent > 10) {
             // Ignore if user left instantly
+            if (!userData[userId]) {
+                userData[userId] = {
+                    username,
+                    total_time: 0,
+                    history: {},
+                };
+            }
+            const today = new Date().toISOString().split("T")[0];
             userData[userId].total_time += timeSpent;
             userData[userId].history[today] = (userData[userId].history[today] || 0) + timeSpent;
+            await saveUserData(userData);
             console.log(`🚪 ${username} left voice channel. Time added: ${Math.floor(timeSpent / 60)} min`);
-            await updateDiscordChannel(userData);
+            await updateDiscordChannel();
         }
     }
 });
@@ -141,7 +156,7 @@ client.on("voiceStateUpdate", async (oldState, newState) => {
 // ✅ Handle Button Clicks
 client.on("interactionCreate", async (interaction) => {
     if (!interaction.isButton()) return;
-    let userData = await fetchLatestMessage();
+    const userData = await fetchUserData();
     const userId = interaction.user.id;
     if (interaction.customId === "alltime") {
         if (!userData[userId])
@@ -151,7 +166,7 @@ client.on("interactionCreate", async (interaction) => {
             });
         const totalSeconds = userData[userId].total_time || 0;
         interaction.reply({
-            content: `🕒 **${interaction.user.username}'s Total Voice Time:** ${Math.floor(totalSeconds / 3600)}h ${Math.floor((totalSeconds % 3600) / 60)}m`,
+            content: `🕒 **${interaction.user.username}'s Total Voice Time:** ${Math.floor(totalSeconds / 3600)}h ${Math.floor((totalSeconds % 3600) / 60)}m ${totalSeconds % 60}s`,
             ephemeral: true,
         });
     }
@@ -162,7 +177,7 @@ client.on("interactionCreate", async (interaction) => {
             const date = new Date(today);
             date.setDate(date.getDate() - i);
             const day = date.toISOString().split("T")[0];
-            report += `📆 **${day}:** ${Math.floor((userData[userId]?.history[day] || 0) / 3600)}h\n`;
+            report += `📆 **${day}:** ${Math.floor((userData[userId]?.history[day] || 0) / 3600)}h ${Math.floor(((userData[userId]?.history[day] || 0) % 3600) / 60)}m ${(userData[userId]?.history[day] || 0) % 60}s\n`;
         }
         interaction.reply({ content: report, ephemeral: true });
     }
@@ -188,7 +203,7 @@ client.on("messageCreate", async (message) => {
         return message.reply("❌ Please mention a valid user.");
     }
 
-    const userData = await fetchLatestMessage();
+    const userData = await fetchUserData();
     const userId = mentionedUser.id;
     if (!userData[userId]) {
         return message.reply(`❌ No data found for ${mentionedUser.username}.`);
@@ -196,15 +211,14 @@ client.on("messageCreate", async (message) => {
 
     const totalSeconds = userData[userId].total_time || 0;
     message.reply(
-        `🕒 **${mentionedUser.username}'s Total Voice Time:** ${Math.floor(totalSeconds / 3600)}h ${Math.floor((totalSeconds % 3600) / 60)}m`
+        `🕒 **${mentionedUser.username}'s Total Voice Time:** ${Math.floor(totalSeconds / 3600)}h ${Math.floor((totalSeconds % 3600) / 60)}m ${totalSeconds % 60}s`
     );
 });
 
 // ✅ Start Bot
 client.once("ready", async () => {
     console.log(`✅ Logged in as ${client.user.tag}`);
-    await fetchLatestMessage();
-    await updateDiscordChannel(await fetchLatestMessage());
+    await updateDiscordChannel();
 });
 
 // ✅ Dummy Express server to satisfy Render's port requirement
