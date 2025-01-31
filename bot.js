@@ -14,7 +14,7 @@ const client = new Client({
     ]
 });
 
-// 🔹 Set your Discord text channel ID
+// 🔹 Set your Discord text channel ID (for tracking messages)
 const TEXT_CHANNEL_ID = "1328094647938973768"; 
 let lastSentMessageId = null;
 const usersInVoice = {};
@@ -65,7 +65,7 @@ function parseMessageData(content) {
     return data;
 }
 
-// ✅ Convert object to a beautiful Discord Embed
+// ✅ Format data into a Discord embed
 function formatDataEmbed(userData) {
     let embed = new EmbedBuilder()
         .setTitle("📢 **Voice Activity Tracking**")
@@ -94,7 +94,7 @@ async function updateDiscordChannel(userData) {
     let buttons = new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId("alltime").setLabel("📊 Check Total Time").setStyle(ButtonStyle.Primary),
         new ButtonBuilder().setCustomId("checkweek").setLabel("📅 Weekly Stats").setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder().setCustomId("reset").setLabel("🗑️ Reset Data").setStyle(ButtonStyle.Danger)
+        new ButtonBuilder().setCustomId("search").setLabel("🔍 Search User").setStyle(ButtonStyle.Success)
     );
 
     try {
@@ -170,10 +170,8 @@ client.on("interactionCreate", async (interaction) => {
         interaction.reply({ content: report, ephemeral: true });
     }
 
-    if (interaction.customId === "reset") {
-        userData[userId] = { username: interaction.user.username, total_time: 0, history: {} };
-        await updateDiscordChannel(userData);
-        interaction.reply({ content: "✅ Your voice time data has been reset!", ephemeral: true });
+    if (interaction.customId === "search") {
+        interaction.reply({ content: "🔍 Mention a user with `!alltime @username` to check their stats.", ephemeral: true });
     }
 });
 
