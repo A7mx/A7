@@ -67,6 +67,14 @@ async function saveUserData(userData) {
     }
 }
 
+// ✅ Format time into HH:mm:ss with two-digit seconds
+function formatTime(seconds) {
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    const secs = String(seconds % 60).padStart(2, "0"); // Ensure two-digit seconds
+    return `${hours}h ${minutes}m ${secs}s`;
+}
+
 // ✅ Format data into a Discord embed
 function formatDataEmbed(userData) {
     let embed = new EmbedBuilder()
@@ -81,7 +89,7 @@ function formatDataEmbed(userData) {
         embed.addFields([
             {
                 name: `🆔 ${user.username}`,
-                value: `🕒 **Total:** ${Math.floor(totalSeconds / 3600)}h ${Math.floor((totalSeconds % 3600) / 60)}m ${totalSeconds % 60}s\n📅 **Today:** ${Math.floor(todaySeconds / 3600)}h ${Math.floor((todaySeconds % 3600) / 60)}m ${todaySeconds % 60}s`,
+                value: `🕒 **Total:** ${formatTime(totalSeconds)}\n📅 **Today:** ${formatTime(todaySeconds)}`,
                 inline: false,
             },
         ]);
@@ -153,66 +161,56 @@ client.on("voiceStateUpdate", async (oldState, newState) => {
     }
 });
 
-// ✅ Handle Button Clicks
-client.on("interactionCreate", async (interaction) => {
-    if (!interaction.isButton()) return;
-    const userData = await fetchUserData();
-    const userId = interaction.user.id;
-    if (interaction.customId === "alltime") {
-        if (!userData[userId])
-            return interaction.reply({
-                content: `❌ No data found for ${interaction.user.username}.`,
-                ephemeral: true,
-            });
+// ✅ Handle Commands (e.g., !alltime @username)
+client.on("messageCreate", async (message) => {
+    if (message.content.startsWith("!alltime")) {
+        const args = message.content.split(" ");
+        if (args.length < 2) {
+            return message.reply("❌ Usage: `!alltime @username`");
+        }
+
+        const mentionedUser = message.mentions.users.first();
+        if (!mentionedUser) {
+            return message.reply("❌ Please mention a valid user.");
+        }
+
+        const userData = await fetchUserData();
+        const userId = mentionedUser.id;
+        if (!userData[userId]) {
+            return message.reply(`❌ No data found for ${mentionedUser.username}.`);
+        }
+
         const totalSeconds = userData[userId].total_time || 0;
-        interaction.reply({
-            content: `🕒 **${interaction.user.username}'s Total Voice Time:** ${Math.floor(totalSeconds / 3600)}h ${Math.floor((totalSeconds % 3600) / 60)}m ${totalSeconds % 60}s`,
-            ephemeral: true,
-        });
+        message.reply(`🕒 **${mentionedUser.username}'s Total Voice Time:** ${formatTime(totalSeconds)}`);
     }
-    if (interaction.customId === "checkweek") {
-        let report = `📅 **${interaction.user.username}'s Weekly Voice Time:**\n`;
+
+    if (message.content.startsWith("!checkweek")) {
+        const args = message.content.split(" ");
+        if (args.length < 2) {
+            return message.reply("❌ Usage: `!checkweek @username`");
+        }
+
+        const mentionedUser = message.mentions.users.first();
+        if (!mentionedUser) {
+            return message.reply("❌ Please mention a valid user.");
+        }
+
+        const userData = await fetchUserData();
+        const userId = mentionedUser.id;
+        if (!userData[userId]) {
+            return message.reply(`❌ No data found for ${mentionedUser.username}.`);
+        }
+
+        let report = `📅 **${mentionedUser.username}'s Weekly Voice Time:**\n`;
         const today = new Date();
         for (let i = 6; i >= 0; i--) {
             const date = new Date(today);
             date.setDate(date.getDate() - i);
             const day = date.toISOString().split("T")[0];
-            report += `📆 **${day}:** ${Math.floor((userData[userId]?.history[day] || 0) / 3600)}h ${Math.floor(((userData[userId]?.history[day] || 0) % 3600) / 60)}m ${(userData[userId]?.history[day] || 0) % 60}s\n`;
+            report += `📆 **${day}:** ${formatTime(userData[userId]?.history[day] || 0)}\n`;
         }
-        interaction.reply({ content: report, ephemeral: true });
+        message.reply(report);
     }
-    if (interaction.customId === "search") {
-        interaction.reply({
-            content: "🔍 Mention a user with `!alltime @username` to check their stats.",
-            ephemeral: true,
-        });
-    }
-});
-
-// ✅ Handle Commands (e.g., !alltime @username)
-client.on("messageCreate", async (message) => {
-    if (!message.content.startsWith("!alltime")) return;
-
-    const args = message.content.split(" ");
-    if (args.length < 2) {
-        return message.reply("❌ Usage: `!alltime @username`");
-    }
-
-    const mentionedUser = message.mentions.users.first();
-    if (!mentionedUser) {
-        return message.reply("❌ Please mention a valid user.");
-    }
-
-    const userData = await fetchUserData();
-    const userId = mentionedUser.id;
-    if (!userData[userId]) {
-        return message.reply(`❌ No data found for ${mentionedUser.username}.`);
-    }
-
-    const totalSeconds = userData[userId].total_time || 0;
-    message.reply(
-        `🕒 **${mentionedUser.username}'s Total Voice Time:** ${Math.floor(totalSeconds / 3600)}h ${Math.floor((totalSeconds % 3600) / 60)}m ${totalSeconds % 60}s`
-    );
 });
 
 // ✅ Start Bot
