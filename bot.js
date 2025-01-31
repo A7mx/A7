@@ -132,21 +132,21 @@ async function showOwnerProfiles(interaction) {
 
     // Create an embed with profile pictures and buttons
     const embed = new EmbedBuilder()
-        .setTitle("👥 A7 AdminChecker | By @A7madShooter")
-        .setDescription("Click on The Name of Admin to see their voice activity stats.")
+        .setTitle("👥 Owners in the Server")
+        .setDescription("Click on a user's name to view their voice activity stats.")
         .setColor("#0099ff");
 
     const buttons = [];
     membersWithRole.forEach((member) => {
         const userId = member.id;
-        const username = member.user.username;
+        const displayName = member.nickname || member.user.username; // Use nickname if available, otherwise username
         const isOnline = member.presence?.status === "online";
 
         // Add a button for each owner
         buttons.push(
             new ButtonBuilder()
                 .setCustomId(`user_${userId}`)
-                .setLabel(username)
+                .setLabel(displayName) // Use nickname or username
                 .setStyle(isOnline ? ButtonStyle.Success : ButtonStyle.Secondary)
         );
     });
@@ -208,7 +208,7 @@ client.on("interactionCreate", async (interaction) => {
 
         const embed = new EmbedBuilder()
             .setTitle(`📊 Select a Timeframe for ${user.username}`)
-            .setDescription("Here you view voice activity stats.")
+            .setDescription("Choose a timeframe to view voice activity stats.")
             .setColor("#0099ff")
             .setThumbnail(interaction.guild.members.cache.get(userId)?.user.displayAvatarURL({ dynamic: true }));
 
@@ -307,8 +307,4 @@ app.get("/", (req, res) => {
 });
 
 app.listen(PORT, () => {
-    console.log(`🌐 Server is running on port ${PORT}`);
-});
-
-// Log in to Discord
-client.login(process.env.DISCORD_BOT_TOKEN);
+    console.log(`🌐 Server is running on port ${PORT
