@@ -23,6 +23,9 @@ const DATABASE_CHANNEL_ID = "1334150400143523872"; // For storing data
 // 🔹 Set the Owner Role ID
 const OWNER_ROLE_ID = "642829799512866872"; // Replace with the actual role ID
 
+// Track users currently in voice channels
+const usersInVoice = {};
+
 // ✅ Fetch or initialize user data from the database channel
 async function fetchUserData() {
     try {
@@ -48,6 +51,28 @@ async function fetchUserData() {
     return {};
 }
 
+// ✅ Save user data to the database channel
+async function saveUserData(userData) {
+    try {
+        const channel = await client.channels.fetch(DATABASE_CHANNEL_ID);
+        if (!channel) return console.error("⚠️ Database channel not found!");
+
+        const messages = await channel.messages.fetch({ limit: 1 });
+        const jsonContent = "```json\n" + JSON.stringify(userData, null, 2) + "\n```";
+
+        if (messages.size === 0) {
+            // No messages in the database channel, create a new one
+            await channel.send(jsonContent);
+        } else {
+            const latestMessage = messages.first();
+            await latestMessage.edit(jsonContent);
+        }
+        console.log("✅ Saved user data to the database channel.");
+    } catch (error) {
+        console.error("⚠️ Error saving user data:", error);
+    }
+}
+
 // ✅ Format time into HH:mm:ss with two-digit seconds (ensure seconds are integers)
 function formatTime(seconds) {
     const hours = Math.floor(seconds / 3600);
@@ -56,6 +81,42 @@ function formatTime(seconds) {
     const formattedSeconds = String(secs).padStart(2, "0"); // Ensure two-digit seconds
     return `${hours}h ${minutes}m ${formattedSeconds}s`;
 }
+
+// ✅ Track users joining/leaving voice channels
+client.on("voiceStateUpdate", async (oldState, newState) => {
+    const userId = newState.member?.id || oldState.member?.id;
+    const username = newState.member?.user?.username || oldState.member?.user?.username;
+    if (!userId || !username) return;
+
+    let userData = await fetchUserData();
+
+    // 🎤 User joins voice (Start timer)
+    if (newState.channel && !usersInVoice[userId]) {
+        usersInVoice[userId] = Date.now();
+        console.log(`🎤 ${username} joined ${newState.channel.name}`);
+    }
+
+    // 🚪 User leaves voice (Stop timer and update time)
+    if ((!newState.channel && oldState.channel) && usersInVoice[userId]) {
+        const timeSpent = (Date.now() - usersInVoice[userId]) / 1000;
+        delete usersInVoice[userId];
+        if (timeSpent > 10) {
+            // Ignore if user left instantly
+            if (!userData[userId]) {
+                userData[userId] = {
+                    username,
+                    total_time: 0,
+                    history: {},
+                };
+            }
+            const today = new Date().toISOString().split("T")[0];
+            userData[userId].total_time += timeSpent;
+            userData[userId].history[today] = (userData[userId].history[today] || 0) + timeSpent;
+            await saveUserData(userData);
+            console.log(`🚪 ${username} left voice channel. Time added: ${Math.floor(timeSpent / 60)} min`);
+        }
+    }
+});
 
 // ✅ Create an embed with profile pictures of users with the Owner role
 async function showOwnerProfiles(interaction) {
@@ -172,27 +233,37 @@ client.on("interactionCreate", async (interaction) => {
         }
 
         let timeframeLabel = "";
-        let timeframeTime = 0;
+        let timeframeData = "";
 
         if (customId.startsWith("day_")) {
             const today = new Date().toISOString().split("T")[0];
             timeframeLabel = "🕒 Today";
-            timeframeTime = user.history[today] || 0;
+            timeframeData = formatTime(user.history[today] || 0);
         } else if (customId.startsWith("week_")) {
-            timeframeLabel = "📅 This Week";
-            timeframeTime = calculateWeeklyTime(user.history);
+            timeframeLabel = "📅 Weekly Breakdown";
+            const today = new Date();
+            let weeklyBreakdown = "";
+            for (let i = 6; i >= 0; i--) {
+                const date = new Date(today);
+                date.setDate(date.getDate() - i);
+                const day = date.toISOString().split("T")[0];
+                const dayName = date.toLocaleDateString("en-US", { weekday: "short" }); // e.g., "Mon"
+                const dayTime = formatTime(user.history[day] || 0);
+                weeklyBreakdown += `📆 **${dayName} (${day})**: ${dayTime}\n`;
+            }
+            timeframeData = weeklyBreakdown || "No data for the past 7 days.";
         } else if (customId.startsWith("month_")) {
             timeframeLabel = "🗓️ This Month";
-            timeframeTime = calculateMonthlyTime(user.history);
+            timeframeData = formatTime(calculateMonthlyTime(user.history));
         } else if (customId.startsWith("alltime_")) {
             timeframeLabel = "⏳ All Time";
-            timeframeTime = user.total_time;
+            timeframeData = formatTime(user.total_time);
         }
 
         const embed = new EmbedBuilder()
             .setTitle(`📊 Voice Activity Stats for ${user.username}`)
             .setDescription(`Here are the voice activity stats for <@${userId}>:`)
-            .addFields([{ name: timeframeLabel, value: formatTime(timeframeTime), inline: true }])
+            .addFields([{ name: timeframeLabel, value: timeframeData }])
             .setColor("#0099ff")
             .setThumbnail(interaction.guild.members.cache.get(userId)?.user.displayAvatarURL({ dynamic: true }));
 
@@ -202,19 +273,6 @@ client.on("interactionCreate", async (interaction) => {
         });
     }
 });
-
-// ✅ Calculate weekly time from history
-function calculateWeeklyTime(history) {
-    const today = new Date();
-    let totalSeconds = 0;
-    for (let i = 0; i < 7; i++) {
-        const date = new Date(today);
-        date.setDate(date.getDate() - i);
-        const day = date.toISOString().split("T")[0];
-        totalSeconds += history[day] || 0;
-    }
-    return totalSeconds;
-}
 
 // ✅ Calculate monthly time from history
 function calculateMonthlyTime(history) {
