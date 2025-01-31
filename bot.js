@@ -307,4 +307,8 @@ app.get("/", (req, res) => {
 });
 
 app.listen(PORT, () => {
-    console.log(`🌐 Server is running on port ${PORT
+    console.log(`🌐 Server is running on port ${PORT}`); // Fixed: Properly closed the template literal
+});
+
+// Log in to Discord
+client.login(process.env.DISCORD_BOT_TOKEN);
