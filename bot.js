@@ -26,13 +26,14 @@ const client = new Client({
     ]
 });
 
-// ** Online Data Storage Link ** (Replace with your actual online JSON file URL)
+// ** Online Data Storage Link ** (Replace this with your actual writable JSON URL)
 const DATA_FILE_URL = "https://www.editpad.org/?edit-id=i5IAo8Oxiib96493c2"; 
 
 // Load Data from Online File
 async function loadUserData() {
     try {
         const response = await axios.get(DATA_FILE_URL);
+        console.log("📂 Fetched User Data:", response.data); // Debugging Log
         return response.data || {};
     } catch (error) {
         console.error("⚠️ Error loading user data:", error);
@@ -55,7 +56,7 @@ const usersInVoice = {};
 
 // Ensure user data exists
 const ensureUserHistory = (userTotalTime, userId) => {
-    if (!userTotalTime[userId]) {
+    if (!userTotalTime[userId] || typeof userTotalTime[userId] !== "object") {
         userTotalTime[userId] = { total_time: 0, history: {} };
     }
 };
