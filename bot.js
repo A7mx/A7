@@ -113,8 +113,8 @@ async function updateDiscordChannel(userData) {
 // ✅ Track users joining/leaving voice channels
 client.on("voiceStateUpdate", async (oldState, newState) => {
     let userData = await fetchLatestMessage();
-    const userId = newState.member.id;
-    const username = newState.member.user.username;
+    const userId = newState.member?.id || oldState.member?.id;
+    const username = newState.member?.user?.username || oldState.member?.user?.username;
     const today = new Date().toISOString().split("T")[0];
     if (!userData[userId]) {
         userData[userId] = { username, total_time: 0, history: {} };
@@ -125,7 +125,7 @@ client.on("voiceStateUpdate", async (oldState, newState) => {
         console.log(`🎤 ${username} joined ${newState.channel.name}`);
     }
     // 🚪 User leaves voice (Stop timer and update time)
-    if (!newState.channel && usersInVoice[userId]) {
+    if ((!newState.channel && oldState.channel) && usersInVoice[userId]) {
         const timeSpent = (Date.now() - usersInVoice[userId]) / 1000;
         delete usersInVoice[userId];
         if (timeSpent > 10) {
@@ -172,6 +172,32 @@ client.on("interactionCreate", async (interaction) => {
             ephemeral: true,
         });
     }
+});
+
+// ✅ Handle Commands (e.g., !alltime @username)
+client.on("messageCreate", async (message) => {
+    if (!message.content.startsWith("!alltime")) return;
+
+    const args = message.content.split(" ");
+    if (args.length < 2) {
+        return message.reply("❌ Usage: `!alltime @username`");
+    }
+
+    const mentionedUser = message.mentions.users.first();
+    if (!mentionedUser) {
+        return message.reply("❌ Please mention a valid user.");
+    }
+
+    const userData = await fetchLatestMessage();
+    const userId = mentionedUser.id;
+    if (!userData[userId]) {
+        return message.reply(`❌ No data found for ${mentionedUser.username}.`);
+    }
+
+    const totalSeconds = userData[userId].total_time || 0;
+    message.reply(
+        `🕒 **${mentionedUser.username}'s Total Voice Time:** ${Math.floor(totalSeconds / 3600)}h ${Math.floor((totalSeconds % 3600) / 60)}m`
+    );
 });
 
 // ✅ Start Bot
