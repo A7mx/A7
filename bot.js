@@ -21,7 +21,7 @@ const TEXT_CHANNEL_ID = "1328094647938973768"; // For tracking messages
 const DATABASE_CHANNEL_ID = "1334150400143523872"; // For storing data
 
 // 🔹 Set the Owner Role ID
-const OWNER_ROLE_ID = "642829799512866872"; // Replace with the actual role ID
+const OWNER_ROLE_ID = "602973779202670607"; // Replace with the actual role ID
 
 // Track users currently in voice channels
 const usersInVoice = {};
