@@ -12,6 +12,7 @@ const client = new Client({
         GatewayIntentBits.MessageContent,
         GatewayIntentBits.GuildVoiceStates,
         GatewayIntentBits.GuildMembers,
+        GatewayIntentBits.GuildPresences,
     ],
 });
 
@@ -47,12 +48,13 @@ async function fetchUserData() {
     return {};
 }
 
-// ✅ Format time into HH:mm:ss with two-digit seconds
+// ✅ Format time into HH:mm:ss with two-digit seconds (ensure seconds are integers)
 function formatTime(seconds) {
     const hours = Math.floor(seconds / 3600);
     const minutes = Math.floor((seconds % 3600) / 60);
-    const secs = String(seconds % 60).padStart(2, "0"); // Ensure two-digit seconds
-    return `${hours}h ${minutes}m ${secs}s`;
+    const secs = Math.floor(seconds % 60); // Ensure seconds are integers
+    const formattedSeconds = String(secs).padStart(2, "0"); // Ensure two-digit seconds
+    return `${hours}h ${minutes}m ${formattedSeconds}s`;
 }
 
 // ✅ Create an embed with profile pictures of users with the Owner role
@@ -70,20 +72,21 @@ async function showOwnerProfiles(interaction) {
     // Create an embed with profile pictures and buttons
     const embed = new EmbedBuilder()
         .setTitle("👥 Owners in the Server")
-        .setDescription("Click on a profile picture to view their voice activity stats.")
+        .setDescription("Click on a user's name to view their voice activity stats.")
         .setColor("#0099ff");
 
     const buttons = [];
     membersWithRole.forEach((member) => {
         const userId = member.id;
         const username = member.user.username;
+        const isOnline = member.presence?.status === "online";
 
         // Add a button for each owner
         buttons.push(
             new ButtonBuilder()
-                .setCustomId(`profile_${userId}`)
+                .setCustomId(`user_${userId}`)
                 .setLabel(username)
-                .setStyle(ButtonStyle.Secondary)
+                .setStyle(isOnline ? ButtonStyle.Success : ButtonStyle.Secondary)
         );
     });
 
@@ -105,7 +108,9 @@ client.on("interactionCreate", async (interaction) => {
     if (!interaction.isButton()) return;
 
     const customId = interaction.customId;
-    if (customId.startsWith("profile_")) {
+
+    // Handle user profile button clicks
+    if (customId.startsWith("user_")) {
         const userId = customId.split("_")[1];
         const userData = await fetchUserData();
         const user = userData[userId];
@@ -117,19 +122,77 @@ client.on("interactionCreate", async (interaction) => {
             });
         }
 
-        const today = new Date().toISOString().split("T")[0];
-        const todayTime = formatTime(user.history[today] || 0);
-        const weeklyTime = calculateWeeklyTime(user.history);
-        const totalTime = formatTime(user.total_time);
+        // Create three new buttons for Day, Week, Month, and All Time
+        const dayButton = new ButtonBuilder()
+            .setCustomId(`day_${userId}`)
+            .setLabel("📅 Day")
+            .setStyle(ButtonStyle.Primary);
+
+        const weekButton = new ButtonBuilder()
+            .setCustomId(`week_${userId}`)
+            .setLabel("🗓️ Week")
+            .setStyle(ButtonStyle.Primary);
+
+        const monthButton = new ButtonBuilder()
+            .setCustomId(`month_${userId}`)
+            .setLabel("🗓️ Month")
+            .setStyle(ButtonStyle.Primary);
+
+        const allTimeButton = new ButtonBuilder()
+            .setCustomId(`alltime_${userId}`)
+            .setLabel("⏳ All Time")
+            .setStyle(ButtonStyle.Primary);
+
+        const actionRow = new ActionRowBuilder().addComponents(dayButton, weekButton, monthButton, allTimeButton);
+
+        const embed = new EmbedBuilder()
+            .setTitle(`📊 Select a Timeframe for ${user.username}`)
+            .setDescription("Choose a timeframe to view voice activity stats.")
+            .setColor("#0099ff")
+            .setThumbnail(interaction.guild.members.cache.get(userId)?.user.displayAvatarURL({ dynamic: true }));
+
+        await interaction.reply({
+            embeds: [embed],
+            components: [actionRow],
+            ephemeral: true,
+        });
+    }
+
+    // Handle timeframe button clicks
+    if (customId.startsWith("day_") || customId.startsWith("week_") || customId.startsWith("month_") || customId.startsWith("alltime_")) {
+        const userId = customId.split("_")[1];
+        const userData = await fetchUserData();
+        const user = userData[userId];
+
+        if (!user) {
+            return interaction.reply({
+                content: "❌ No data found for this user.",
+                ephemeral: true,
+            });
+        }
+
+        let timeframeLabel = "";
+        let timeframeTime = 0;
+
+        if (customId.startsWith("day_")) {
+            const today = new Date().toISOString().split("T")[0];
+            timeframeLabel = "🕒 Today";
+            timeframeTime = user.history[today] || 0;
+        } else if (customId.startsWith("week_")) {
+            timeframeLabel = "📅 This Week";
+            timeframeTime = calculateWeeklyTime(user.history);
+        } else if (customId.startsWith("month_")) {
+            timeframeLabel = "🗓️ This Month";
+            timeframeTime = calculateMonthlyTime(user.history);
+        } else if (customId.startsWith("alltime_")) {
+            timeframeLabel = "⏳ All Time";
+            timeframeTime = user.total_time;
+        }
 
         const embed = new EmbedBuilder()
             .setTitle(`📊 Voice Activity Stats for ${user.username}`)
             .setDescription(`Here are the voice activity stats for <@${userId}>:`)
-            .addFields([
-                { name: "🕒 Today", value: todayTime, inline: true },
-                { name: "📅 This Week", value: weeklyTime, inline: true },
-                { name: "⏳ All Time", value: totalTime, inline: true },
-            ])
+            .addFields([{ name: timeframeLabel, value: formatTime(timeframeTime), inline: true }])
             .setColor("#0099ff")
             .setThumbnail(interaction.guild.members.cache.get(userId)?.user.displayAvatarURL({ dynamic: true }));
 
@@ -150,7 +213,22 @@ function calculateWeeklyTime(history) {
         const day = date.toISOString().split("T")[0];
         totalSeconds += history[day] || 0;
     }
-    return formatTime(totalSeconds);
+    return totalSeconds;
+}
+
+// ✅ Calculate monthly time from history
+function calculateMonthlyTime(history) {
+    const today = new Date();
+    const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+    let totalSeconds = 0;
+
+    for (const day in history) {
+        const date = new Date(day);
+        if (date >= startOfMonth) {
+            totalSeconds += history[day];
+        }
+    }
+    return totalSeconds;
 }
 
 // ✅ Command to trigger the profile display
