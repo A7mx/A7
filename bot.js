@@ -135,7 +135,7 @@ async function showOwnerProfiles(interaction) {
 
     // Create an embed with profile pictures and buttons
     const embed = new EmbedBuilder()
-        .setTitle("👥 Owners in the Server")
+        .setTitle("👥 A7 Admin Checker | By @A7madShooter")
         .setDescription("Click on a user's name to view their voice activity stats.")
         .setColor("#0099ff");
 
