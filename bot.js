@@ -30,19 +30,7 @@ async function fetchLatestMessage() {
         for (const message of messages.values()) {
             if (message.author.id === client.user.id) {
                 lastSentMessageId = message.id;
-                const content = message.content.replace(/```json|```/g, "").trim();
-                
-                if (!content.startsWith("{")) {
-                    console.warn("⚠️ Invalid JSON detected, resetting data...");
-                    return {};
-                }
-
-                try {
-                    return JSON.parse(content);
-                } catch (error) {
-                    console.error("⚠️ JSON Parse Error: Message content is invalid JSON.");
-                    return {};
-                }
+                return parseMessageData(message.content);
             }
         }
     } catch (error) {
@@ -51,12 +39,53 @@ async function fetchLatestMessage() {
     return {};
 }
 
+// ✅ Convert normal text message into a data object
+function parseMessageData(messageContent) {
+    const lines = messageContent.split("\n");
+    let data = {};
+
+    for (let line of lines) {
+        const match = line.match(/^🆔 (\d+): Total: (\d+)h (\d+)m \| Today: (\d+)h (\d+)m$/);
+        if (match) {
+            const userId = match[1];
+            const totalHours = parseInt(match[2]);
+            const totalMinutes = parseInt(match[3]);
+            const todayHours = parseInt(match[4]);
+            const todayMinutes = parseInt(match[5]);
+
+            data[userId] = {
+                total_time: totalHours * 3600 + totalMinutes * 60,
+                history: {
+                    [new Date().toISOString().split("T")[0]]: todayHours * 3600 + todayMinutes * 60
+                }
+            };
+        }
+    }
+    return data;
+}
+
+// ✅ Convert data object into a formatted text message
+function formatDataMessage(userData) {
+    let message = "📢 **Updated User Data:**\n";
+    for (const userId in userData) {
+        const totalSeconds = userData[userId].total_time;
+        const today = new Date().toISOString().split("T")[0];
+        const todaySeconds = userData[userId].history[today] || 0;
+
+        const totalTime = `${Math.floor(totalSeconds / 3600)}h ${Math.floor((totalSeconds % 3600) / 60)}m`;
+        const todayTime = `${Math.floor(todaySeconds / 3600)}h ${Math.floor((todaySeconds % 3600) / 60)}m`;
+
+        message += `🆔 ${userId}: Total: ${totalTime} | Today: ${todayTime}\n`;
+    }
+    return message;
+}
+
 // ✅ Update or send a message containing the latest voice time data
 async function updateDiscordChannel(userData) {
     const channel = await client.channels.fetch(TEXT_CHANNEL_ID);
     if (!channel) return console.error("⚠️ Discord channel not found!");
 
-    let formattedText = `📢 **Updated User Data:**\n\`\`\`json\n${JSON.stringify(userData, null, 2)}\n\`\`\``;
+    let formattedText = formatDataMessage(userData);
 
     try {
         if (lastSentMessageId) {
