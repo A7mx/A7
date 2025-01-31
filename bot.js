@@ -294,7 +294,7 @@ function calculateMonthlyTime(history) {
 
 // ✅ Command to trigger the profile display
 client.on("messageCreate", async (message) => {
-    if (message.content === "!owners") {
+    if (message.content === "!admin") {
         await showOwnerProfiles(message);
     }
 });
