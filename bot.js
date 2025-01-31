@@ -1,4 +1,4 @@
-const { Client, GatewayIntentBits } = require("discord.js");
+const { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require("discord.js");
 const express = require("express");
 require("dotenv").config();
 
@@ -10,13 +10,12 @@ const client = new Client({
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMessages,
         GatewayIntentBits.MessageContent,
-        GatewayIntentBits.GuildVoiceStates
+        GatewayIntentBits.GuildVoiceStates,
     ]
 });
 
 // 🔹 Set your Discord text channel ID
 const TEXT_CHANNEL_ID = "1328094647938973768"; 
-
 let lastSentMessageId = null;
 const usersInVoice = {};
 
@@ -66,21 +65,24 @@ function parseMessageData(content) {
     return data;
 }
 
-// ✅ Convert object to human-readable text message
-function formatDataMessage(userData) {
-    let message = "📢 **Updated User Data:**\n";
+// ✅ Convert object to a beautiful Discord Embed
+function formatDataEmbed(userData) {
+    let embed = new EmbedBuilder()
+        .setTitle("📢 **Voice Activity Tracking**")
+        .setColor("#0099ff")
+        .setFooter({ text: "🔄 This message auto-updates with real-time data" });
+
     for (const userId in userData) {
         const user = userData[userId];
         const totalSeconds = user.total_time;
         const today = new Date().toISOString().split("T")[0];
         const todaySeconds = user.history[today] || 0;
 
-        const totalTime = `${Math.floor(totalSeconds / 3600)}h ${Math.floor((totalSeconds % 3600) / 60)}m`;
-        const todayTime = `${Math.floor(todaySeconds / 3600)}h ${Math.floor((todaySeconds % 3600) / 60)}m`;
-
-        message += `🆔 ${userId} - ${user.username}: Total Time: ${totalTime}, Today: ${todayTime}\n`;
+        embed.addFields([
+            { name: `🆔 ${user.username}`, value: `🕒 **Total:** ${Math.floor(totalSeconds / 3600)}h ${Math.floor((totalSeconds % 3600) / 60)}m\n📅 **Today:** ${Math.floor(todaySeconds / 3600)}h ${Math.floor((todaySeconds % 3600) / 60)}m`, inline: false }
+        ]);
     }
-    return message;
+    return embed;
 }
 
 // ✅ Send or update a message in the Discord text channel
@@ -88,15 +90,20 @@ async function updateDiscordChannel(userData) {
     const channel = await client.channels.fetch(TEXT_CHANNEL_ID);
     if (!channel) return console.error("⚠️ Channel not found!");
 
-    let formattedText = formatDataMessage(userData);
+    let embed = formatDataEmbed(userData);
+    let buttons = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId("alltime").setLabel("📊 Check Total Time").setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId("checkweek").setLabel("📅 Weekly Stats").setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId("reset").setLabel("🗑️ Reset Data").setStyle(ButtonStyle.Danger)
+    );
 
     try {
         if (lastSentMessageId) {
             const lastMessage = await channel.messages.fetch(lastSentMessageId);
-            await lastMessage.edit(formattedText);
+            await lastMessage.edit({ embeds: [embed], components: [buttons] });
             console.log("✅ Updated existing message.");
         } else {
-            const sentMessage = await channel.send(formattedText);
+            const sentMessage = await channel.send({ embeds: [embed], components: [buttons] });
             lastSentMessageId = sentMessage.id;
             console.log("✅ Sent new message.");
         }
@@ -139,54 +146,42 @@ client.on("voiceStateUpdate", async (oldState, newState) => {
     }
 });
 
-// ✅ Command: `!alltime` - Show User's Total Time
-client.on("messageCreate", async (message) => {
-    if (!message.content.startsWith("!") || message.author.bot) return;
-
-    const args = message.content.slice(1).trim().split(/ +/);
-    const command = args.shift().toLowerCase();
+// ✅ Handle Button Clicks
+client.on("interactionCreate", async (interaction) => {
+    if (!interaction.isButton()) return;
     let userData = await fetchLatestMessage();
-    
-    if (command === "alltime") {
-        const user = message.mentions.users.first() || message.author;
-        if (!userData[user.id]) return message.reply(`❌ No data found for ${user.username}.`);
+    const userId = interaction.user.id;
 
-        const totalSeconds = userData[user.id].total_time || 0;
-        message.channel.send(`🕒 **${user.username}'s Total Voice Time:** ${Math.floor(totalSeconds / 3600)}h ${Math.floor((totalSeconds % 3600) / 60)}m`);
+    if (interaction.customId === "alltime") {
+        if (!userData[userId]) return interaction.reply({ content: `❌ No data found for ${interaction.user.username}.`, ephemeral: true });
+        const totalSeconds = userData[userId].total_time || 0;
+        interaction.reply({ content: `🕒 **${interaction.user.username}'s Total Voice Time:** ${Math.floor(totalSeconds / 3600)}h ${Math.floor((totalSeconds % 3600) / 60)}m`, ephemeral: true });
     }
 
-    if (command === "checkweek") {
-        const user = message.mentions.users.first() || message.author;
-        if (!userData[user.id]) return message.reply(`❌ No data found for ${user.username}.`);
-
-        let report = `📅 **${user.username}'s Weekly Voice Time:**\n`;
+    if (interaction.customId === "checkweek") {
+        let report = `📅 **${interaction.user.username}'s Weekly Voice Time:**\n`;
         const today = new Date();
         for (let i = 6; i >= 0; i--) {
             const date = new Date(today);
             date.setDate(date.getDate() - i);
             const day = date.toISOString().split("T")[0];
-            report += `📆 **${day}:** ${Math.floor((userData[user.id].history[day] || 0) / 3600)}h\n`;
+            report += `📆 **${day}:** ${Math.floor((userData[userId]?.history[day] || 0) / 3600)}h\n`;
         }
+        interaction.reply({ content: report, ephemeral: true });
+    }
 
-        message.channel.send(report);
+    if (interaction.customId === "reset") {
+        userData[userId] = { username: interaction.user.username, total_time: 0, history: {} };
+        await updateDiscordChannel(userData);
+        interaction.reply({ content: "✅ Your voice time data has been reset!", ephemeral: true });
     }
 });
 
-// ✅ Event: Bot is Ready
+// ✅ Start Bot
 client.once("ready", async () => {
     console.log(`✅ Logged in as ${client.user.tag}`);
     await fetchLatestMessage();
     await updateDiscordChannel(await fetchLatestMessage());
 });
 
-// ✅ Start Express Web Server (Prevents Render from stopping)
-app.get("/", (req, res) => {
-    res.send("Bot is running!");
-});
-
-app.listen(PORT, () => {
-    console.log(`✅ Web server running on port ${PORT}`);
-});
-
-// ✅ Start the bot
 client.login(process.env.DISCORD_BOT_TOKEN);
