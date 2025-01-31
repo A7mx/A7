@@ -26,8 +26,8 @@ const client = new Client({
     ]
 });
 
-// ** Online Data Storage Link ** (Replace this with your actual writable JSON URL)
-const DATA_FILE_URL = "https://www.editpad.org/?edit-id=i5IAo8Oxiib96493c2"; 
+// ** GitHub Gist JSON File **
+const DATA_FILE_URL = "https://gist.githubusercontent.com/A7mx/6b71c0aa9d924290582243a0cd41ba35/raw/7ae9090a1abaa4bc837a64cca28da4afd85422a0/user_time_data.json";
 
 // Load Data from Online File
 async function loadUserData() {
@@ -38,16 +38,6 @@ async function loadUserData() {
     } catch (error) {
         console.error("⚠️ Error loading user data:", error);
         return {};
-    }
-}
-
-// Save Data to Online File (Replace this with an actual writable API if needed)
-async function saveUserData(data) {
-    try {
-        await axios.post(DATA_FILE_URL, data, { headers: { "Content-Type": "application/json" } });
-        console.log("✅ User data saved!");
-    } catch (error) {
-        console.error("⚠️ Error saving user data:", error);
     }
 }
 
@@ -86,7 +76,6 @@ client.on("voiceStateUpdate", async (oldState, newState) => {
             userTotalTime[userId].history[today] = (userTotalTime[userId].history[today] || 0) + timeSpent;
 
             delete usersInVoice[userId]; // Remove from active tracking
-            await saveUserData(userTotalTime);
             console.log(`🚪 ${newState.member.displayName} left voice. Time added: ${timeSpent.toFixed(2)}s`);
         }
     }
