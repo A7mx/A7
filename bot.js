@@ -26,18 +26,36 @@ const client = new Client({
     ]
 });
 
-// ** GitHub Gist JSON File **
-const DATA_FILE_URL = "https://gist.githubusercontent.com/A7mx/6b71c0aa9d924290582243a0cd41ba35/raw/7ae9090a1abaa4bc837a64cca28da4afd85422a0/user_time_data.json";
+// ** JSONBin.io API Details **
+const DATA_FILE_URL = "https://api.jsonbin.io/v3/b/679c853fad19ca34f8f75ef5";
+const JSONBIN_API_KEY = "YOUR_JSONBIN_SECRET_KEY";  // Replace with your JSONBin.io Secret Key
 
-// Load Data from Online File
+// Fetch Data from JSONBin.io
 async function loadUserData() {
     try {
-        const response = await axios.get(DATA_FILE_URL);
-        console.log("📂 Fetched User Data:", response.data); // Debugging Log
-        return response.data || {};
+        const response = await axios.get(DATA_FILE_URL, {
+            headers: { "X-Master-Key": JSONBIN_API_KEY }
+        });
+        console.log("📂 Fetched User Data:", response.data.record); // Debugging Log
+        return response.data.record || {};
     } catch (error) {
         console.error("⚠️ Error loading user data:", error);
         return {};
+    }
+}
+
+// Save Data to JSONBin.io
+async function saveUserData(userTotalTime) {
+    try {
+        await axios.put(DATA_FILE_URL, userTotalTime, {
+            headers: {
+                "X-Master-Key": JSONBIN_API_KEY,
+                "Content-Type": "application/json"
+            }
+        });
+        console.log("✅ Data successfully updated in JSONBin.io");
+    } catch (error) {
+        console.error("⚠️ Error saving user data:", error);
     }
 }
 
@@ -77,6 +95,7 @@ client.on("voiceStateUpdate", async (oldState, newState) => {
             userTotalTime[userId].history[today] = (userTotalTime[userId].history[today] || 0) + timeSpent;
 
             delete usersInVoice[userId]; // Remove from active tracking
+            await saveUserData(userTotalTime); // Save updated data
             console.log(`🚪 ${newState.member.displayName} left voice. Time added: ${timeSpent.toFixed(2)}s`);
         }
     }
