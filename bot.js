@@ -10,7 +10,8 @@ const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.MessageContent
+        GatewayIntentBits.MessageContent,
+        GatewayIntentBits.GuildVoiceStates
     ]
 });
 
@@ -18,6 +19,7 @@ const client = new Client({
 const TEXT_CHANNEL_ID = "1328094647938973768"; 
 
 let lastSentMessageId = null; // Stores last message ID for updates
+const usersInVoice = {}; // Tracks when users join voice channels
 
 // ✅ Function to Fetch Latest Message from Discord Channel (Database)
 async function fetchLatestMessage() {
@@ -61,7 +63,7 @@ async function updateDiscordChannel(userData) {
     }
 }
 
-// ✅ Function to Handle User Joining/Leaving Voice Channels
+// ✅ Event: User Joins/Leaves Voice Channel
 client.on("voiceStateUpdate", async (oldState, newState) => {
     let userData = await fetchLatestMessage();
 
@@ -73,16 +75,26 @@ client.on("voiceStateUpdate", async (oldState, newState) => {
         userData[userId] = { total_time: 0, history: {} };
     }
 
+    // 🎤 User joins a voice channel (Start tracking)
     if (newState.channel) {
-        userData[userId].history[today] = (userData[userId].history[today] || 0);
-        console.log(`🎤 ${username} joined ${newState.channel.name}`);
-    } else {
-        userData[userId].history[today] += Math.random() * 100; // Simulating time tracking
-        userData[userId].total_time += Math.random() * 100;
-        console.log(`🚪 ${username} left voice channel`);
+        if (!usersInVoice[userId]) {
+            usersInVoice[userId] = Date.now(); // Store join time
+            console.log(`🎤 ${username} joined ${newState.channel.name}`);
+        }
     }
 
-    await updateDiscordChannel(userData);
+    // 🚪 User leaves voice channel (Update time)
+    if (!newState.channel && usersInVoice[userId]) {
+        const timeSpent = (Date.now() - usersInVoice[userId]) / 1000; // Time in seconds
+        usersInVoice[userId] = null; // Reset tracking
+
+        userData[userId].total_time += timeSpent;
+        userData[userId].history[today] = (userData[userId].history[today] || 0) + timeSpent;
+
+        console.log(`🚪 ${username} left voice channel. Time added: ${Math.floor(timeSpent / 60)} min`);
+
+        await updateDiscordChannel(userData);
+    }
 });
 
 // ✅ `!alltime` Command: Show User's Total Time
