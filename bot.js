@@ -11,14 +11,16 @@ const client = new Client({
         GatewayIntentBits.GuildMessages,
         GatewayIntentBits.MessageContent,
         GatewayIntentBits.GuildVoiceStates,
+        GatewayIntentBits.GuildMembers,
     ],
 });
 
 // 🔹 Set your Discord text channel IDs
 const TEXT_CHANNEL_ID = "1328094647938973768"; // For tracking messages
 const DATABASE_CHANNEL_ID = "1334150400143523872"; // For storing data
-let lastSentMessageId = null;
-const usersInVoice = {};
+
+// 🔹 Set the Owner Role ID
+const OWNER_ROLE_ID = "642829799512866872"; // Replace with the actual role ID
 
 // ✅ Fetch or initialize user data from the database channel
 async function fetchUserData() {
@@ -45,28 +47,6 @@ async function fetchUserData() {
     return {};
 }
 
-// ✅ Save user data to the database channel
-async function saveUserData(userData) {
-    try {
-        const channel = await client.channels.fetch(DATABASE_CHANNEL_ID);
-        if (!channel) return console.error("⚠️ Database channel not found!");
-
-        const messages = await channel.messages.fetch({ limit: 1 });
-        const jsonContent = "```json\n" + JSON.stringify(userData, null, 2) + "\n```";
-
-        if (messages.size === 0) {
-            // No messages in the database channel, create a new one
-            await channel.send(jsonContent);
-        } else {
-            const latestMessage = messages.first();
-            await latestMessage.edit(jsonContent);
-        }
-        console.log("✅ Saved user data to the database channel.");
-    } catch (error) {
-        console.error("⚠️ Error saving user data:", error);
-    }
-}
-
 // ✅ Format time into HH:mm:ss with two-digit seconds
 function formatTime(seconds) {
     const hours = Math.floor(seconds / 3600);
@@ -75,148 +55,114 @@ function formatTime(seconds) {
     return `${hours}h ${minutes}m ${secs}s`;
 }
 
-// ✅ Format data into a Discord embed
-function formatDataEmbed(userData) {
-    let embed = new EmbedBuilder()
-        .setTitle("📢 **Voice Activity Tracking**")
-        .setColor("#0099ff")
-        .setFooter({ text: "🔄 This message auto-updates with real-time data" });
-    for (const userId in userData) {
-        const user = userData[userId];
-        const totalSeconds = user.total_time;
-        const today = new Date().toISOString().split("T")[0];
-        const todaySeconds = user.history[today] || 0;
-        embed.addFields([
-            {
-                name: `🆔 ${user.username}`,
-                value: `🕒 **Total:** ${formatTime(totalSeconds)}\n📅 **Today:** ${formatTime(todaySeconds)}`,
-                inline: false,
-            },
-        ]);
-    }
-    return embed;
-}
+// ✅ Create an embed with profile pictures of users with the Owner role
+async function showOwnerProfiles(interaction) {
+    const guild = interaction.guild;
 
-// ✅ Send or update a message in the Discord text channel
-async function updateDiscordChannel() {
+    // Fetch members with the Owner role using the role ID
+    const membersWithRole = guild.members.cache.filter((member) => member.roles.cache.has(OWNER_ROLE_ID));
+    if (membersWithRole.size === 0) {
+        return interaction.reply("❌ No members found with the Owner role.");
+    }
+
     const userData = await fetchUserData();
-    const channel = await client.channels.fetch(TEXT_CHANNEL_ID);
-    if (!channel) return console.error("⚠️ Channel not found!");
-    let embed = formatDataEmbed(userData);
-    let buttons = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId("alltime").setLabel("📊 Check Total Time").setStyle(ButtonStyle.Primary),
-        new ButtonBuilder().setCustomId("checkweek").setLabel("📅 Weekly Stats").setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder().setCustomId("search").setLabel("🔍 Search User").setStyle(ButtonStyle.Success)
-    );
-    try {
-        if (lastSentMessageId) {
-            const lastMessage = await channel.messages.fetch(lastSentMessageId);
-            await lastMessage.edit({ embeds: [embed], components: [buttons] });
-            console.log("✅ Updated existing message.");
-        } else {
-            const sentMessage = await channel.send({ embeds: [embed], components: [buttons] });
-            lastSentMessageId = sentMessage.id;
-            console.log("✅ Sent new message.");
-        }
-    } catch (error) {
-        console.error("⚠️ Error sending message:", error);
-        lastSentMessageId = null;
+
+    // Create an embed with profile pictures and buttons
+    const embed = new EmbedBuilder()
+        .setTitle("👥 Owners in the Server")
+        .setDescription("Click on a profile picture to view their voice activity stats.")
+        .setColor("#0099ff");
+
+    const buttons = [];
+    membersWithRole.forEach((member) => {
+        const userId = member.id;
+        const username = member.user.username;
+
+        // Add a button for each owner
+        buttons.push(
+            new ButtonBuilder()
+                .setCustomId(`profile_${userId}`)
+                .setLabel(username)
+                .setStyle(ButtonStyle.Secondary)
+        );
+    });
+
+    // Split buttons into rows (max 5 buttons per row)
+    const actionRows = [];
+    for (let i = 0; i < buttons.length; i += 5) {
+        const row = new ActionRowBuilder().addComponents(buttons.slice(i, i + 5));
+        actionRows.push(row);
     }
+
+    await interaction.reply({
+        embeds: [embed],
+        components: actionRows,
+    });
 }
 
-// ✅ Track users joining/leaving voice channels
-client.on("voiceStateUpdate", async (oldState, newState) => {
-    const userId = newState.member?.id || oldState.member?.id;
-    const username = newState.member?.user?.username || oldState.member?.user?.username;
-    if (!userId || !username) return;
+// ✅ Handle button clicks to show user stats
+client.on("interactionCreate", async (interaction) => {
+    if (!interaction.isButton()) return;
 
-    let userData = await fetchUserData();
+    const customId = interaction.customId;
+    if (customId.startsWith("profile_")) {
+        const userId = customId.split("_")[1];
+        const userData = await fetchUserData();
+        const user = userData[userId];
 
-    // 🎤 User joins voice (Start timer)
-    if (newState.channel && !usersInVoice[userId]) {
-        usersInVoice[userId] = Date.now();
-        console.log(`🎤 ${username} joined ${newState.channel.name}`);
-    }
-
-    // 🚪 User leaves voice (Stop timer and update time)
-    if ((!newState.channel && oldState.channel) && usersInVoice[userId]) {
-        const timeSpent = (Date.now() - usersInVoice[userId]) / 1000;
-        delete usersInVoice[userId];
-        if (timeSpent > 10) {
-            // Ignore if user left instantly
-            if (!userData[userId]) {
-                userData[userId] = {
-                    username,
-                    total_time: 0,
-                    history: {},
-                };
-            }
-            const today = new Date().toISOString().split("T")[0];
-            userData[userId].total_time += timeSpent;
-            userData[userId].history[today] = (userData[userId].history[today] || 0) + timeSpent;
-            await saveUserData(userData);
-            console.log(`🚪 ${username} left voice channel. Time added: ${Math.floor(timeSpent / 60)} min`);
-            await updateDiscordChannel();
+        if (!user) {
+            return interaction.reply({
+                content: "❌ No data found for this user.",
+                ephemeral: true,
+            });
         }
+
+        const today = new Date().toISOString().split("T")[0];
+        const todayTime = formatTime(user.history[today] || 0);
+        const weeklyTime = calculateWeeklyTime(user.history);
+        const totalTime = formatTime(user.total_time);
+
+        const embed = new EmbedBuilder()
+            .setTitle(`📊 Voice Activity Stats for ${user.username}`)
+            .setDescription(`Here are the voice activity stats for <@${userId}>:`)
+            .addFields([
+                { name: "🕒 Today", value: todayTime, inline: true },
+                { name: "📅 This Week", value: weeklyTime, inline: true },
+                { name: "⏳ All Time", value: totalTime, inline: true },
+            ])
+            .setColor("#0099ff")
+            .setThumbnail(interaction.guild.members.cache.get(userId)?.user.displayAvatarURL({ dynamic: true }));
+
+        await interaction.reply({
+            embeds: [embed],
+            ephemeral: true,
+        });
     }
 });
 
-// ✅ Handle Commands (e.g., !alltime @username)
-client.on("messageCreate", async (message) => {
-    if (message.content.startsWith("!alltime")) {
-        const args = message.content.split(" ");
-        if (args.length < 2) {
-            return message.reply("❌ Usage: `!alltime @username`");
-        }
-
-        const mentionedUser = message.mentions.users.first();
-        if (!mentionedUser) {
-            return message.reply("❌ Please mention a valid user.");
-        }
-
-        const userData = await fetchUserData();
-        const userId = mentionedUser.id;
-        if (!userData[userId]) {
-            return message.reply(`❌ No data found for ${mentionedUser.username}.`);
-        }
-
-        const totalSeconds = userData[userId].total_time || 0;
-        message.reply(`🕒 **${mentionedUser.username}'s Total Voice Time:** ${formatTime(totalSeconds)}`);
+// ✅ Calculate weekly time from history
+function calculateWeeklyTime(history) {
+    const today = new Date();
+    let totalSeconds = 0;
+    for (let i = 0; i < 7; i++) {
+        const date = new Date(today);
+        date.setDate(date.getDate() - i);
+        const day = date.toISOString().split("T")[0];
+        totalSeconds += history[day] || 0;
     }
+    return formatTime(totalSeconds);
+}
 
-    if (message.content.startsWith("!checkweek")) {
-        const args = message.content.split(" ");
-        if (args.length < 2) {
-            return message.reply("❌ Usage: `!checkweek @username`");
-        }
-
-        const mentionedUser = message.mentions.users.first();
-        if (!mentionedUser) {
-            return message.reply("❌ Please mention a valid user.");
-        }
-
-        const userData = await fetchUserData();
-        const userId = mentionedUser.id;
-        if (!userData[userId]) {
-            return message.reply(`❌ No data found for ${mentionedUser.username}.`);
-        }
-
-        let report = `📅 **${mentionedUser.username}'s Weekly Voice Time:**\n`;
-        const today = new Date();
-        for (let i = 6; i >= 0; i--) {
-            const date = new Date(today);
-            date.setDate(date.getDate() - i);
-            const day = date.toISOString().split("T")[0];
-            report += `📆 **${day}:** ${formatTime(userData[userId]?.history[day] || 0)}\n`;
-        }
-        message.reply(report);
+// ✅ Command to trigger the profile display
+client.on("messageCreate", async (message) => {
+    if (message.content === "!owners") {
+        await showOwnerProfiles(message);
     }
 });
 
 // ✅ Start Bot
-client.once("ready", async () => {
+client.once("ready", () => {
     console.log(`✅ Logged in as ${client.user.tag}`);
-    await updateDiscordChannel();
 });
 
 // ✅ Dummy Express server to satisfy Render's port requirement
