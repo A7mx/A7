@@ -1,6 +1,11 @@
 const { Client, GatewayIntentBits } = require("discord.js");
+const express = require("express");
 require("dotenv").config();
 
+const app = express();
+const PORT = process.env.PORT || 10000; // Render expects this
+
+// 🚀 Discord Bot Setup
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
@@ -78,6 +83,15 @@ client.once("ready", async () => {
     console.log(`✅ Logged in as ${client.user.tag}`);
     await updateDiscordChannel(); // Send initial message
     await simulateDataChange();   // Start auto-updating
+});
+
+// ✅ Start a simple Express Web Server (Prevents Render from stopping)
+app.get("/", (req, res) => {
+    res.send("Bot is running!");
+});
+
+app.listen(PORT, () => {
+    console.log(`✅ Web server running on port ${PORT}`);
 });
 
 // ✅ Start the bot
