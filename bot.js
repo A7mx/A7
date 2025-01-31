@@ -19,28 +19,27 @@ const TEXT_CHANNEL_ID = "1328094647938973768";
 
 let lastSentMessageId = null; // Stores last message ID for updates
 
-// 🔹 User data (Stored in memory, updated in Discord)
-let userData = {
-    "194999993143263241": {
-        "total_time": 2063.6601571292877,
-        "history": {
-            "2025-01-29": 1914.7335412502289,
-            "2025-01": 1914.7335412502289,
-            "2025-01-30": 31.397
-        }
-    },
-    "1296571757108658304": {
-        "total_time": 953.7574205875396,
-        "history": {
-            "2025-01-29": 867.5824205875397,
-            "2025-01": 867.5824205875397,
-            "2025-01-30": 86.175
-        }
-    }
-};
+// ✅ Function to Fetch Latest Message from Discord Channel (Database)
+async function fetchLatestMessage() {
+    try {
+        const channel = await client.channels.fetch(TEXT_CHANNEL_ID);
+        if (!channel) return console.error("⚠️ Discord channel not found!");
 
-// ✅ Function to Update Discord Message
-async function updateDiscordChannel() {
+        const messages = await channel.messages.fetch({ limit: 10 });
+        for (const message of messages.values()) {
+            if (message.author.id === client.user.id) {
+                lastSentMessageId = message.id;
+                return JSON.parse(message.content.replace(/```json|```/g, "").trim());
+            }
+        }
+    } catch (error) {
+        console.error("⚠️ Error fetching message:", error);
+    }
+    return {}; // Default empty data
+}
+
+// ✅ Function to Update or Create the Discord Message
+async function updateDiscordChannel(userData) {
     const channel = await client.channels.fetch(TEXT_CHANNEL_ID);
     if (!channel) return console.error("⚠️ Discord channel not found!");
 
@@ -58,27 +57,72 @@ async function updateDiscordChannel() {
         }
     } catch (error) {
         console.error("⚠️ Error sending message:", error);
+        lastSentMessageId = null; // Reset message ID if it was deleted
     }
 }
 
-// ✅ Function to Simulate Data Changes Every 10 Seconds
-async function simulateDataChange() {
-    console.log("🔄 Checking for updates...");
-    
-    // Simulating data change (for testing)
-    const userIds = Object.keys(userData);
-    const randomUser = userIds[Math.floor(Math.random() * userIds.length)];
-    userData[randomUser].total_time += Math.random() * 50; // Increment random value
+// ✅ Function to Handle User Joining/Leaving Voice Channels
+client.on("voiceStateUpdate", async (oldState, newState) => {
+    let userData = await fetchLatestMessage();
 
-    await updateDiscordChannel(); // Update Discord message
-    setTimeout(simulateDataChange, 10000); // Runs every 10 seconds
-}
+    const userId = newState.member.id;
+    const username = newState.member.user.username;
+    const today = new Date().toISOString().split("T")[0];
+
+    if (!userData[userId]) {
+        userData[userId] = { total_time: 0, history: {} };
+    }
+
+    if (newState.channel) {
+        userData[userId].history[today] = (userData[userId].history[today] || 0);
+        console.log(`🎤 ${username} joined ${newState.channel.name}`);
+    } else {
+        userData[userId].history[today] += Math.random() * 100; // Simulating time tracking
+        userData[userId].total_time += Math.random() * 100;
+        console.log(`🚪 ${username} left voice channel`);
+    }
+
+    await updateDiscordChannel(userData);
+});
+
+// ✅ `!alltime` Command: Show User's Total Time
+client.on("messageCreate", async (message) => {
+    if (!message.content.startsWith("!") || message.author.bot) return;
+
+    const args = message.content.slice(1).trim().split(/ +/);
+    const command = args.shift().toLowerCase();
+    let userData = await fetchLatestMessage();
+    
+    if (command === "alltime") {
+        const user = message.mentions.users.first() || message.author;
+        if (!userData[user.id]) return message.reply(`❌ No data found for ${user.username}.`);
+
+        const totalSeconds = userData[user.id].total_time || 0;
+        message.channel.send(`🕒 **${user.username}'s Total Voice Time:** ${Math.floor(totalSeconds / 3600)}h ${Math.floor((totalSeconds % 3600) / 60)}m`);
+    }
+
+    if (command === "checkweek") {
+        const user = message.mentions.users.first() || message.author;
+        if (!userData[user.id]) return message.reply(`❌ No data found for ${user.username}.`);
+
+        let report = `📅 **${user.username}'s Weekly Voice Time:**\n`;
+        const today = new Date();
+        for (let i = 6; i >= 0; i--) {
+            const date = new Date(today);
+            date.setDate(date.getDate() - i);
+            const day = date.toISOString().split("T")[0];
+            report += `📆 **${day}:** ${Math.floor((userData[user.id].history[day] || 0) / 3600)}h\n`;
+        }
+
+        message.channel.send(report);
+    }
+});
 
 // ✅ Event: Bot is Ready
 client.once("ready", async () => {
     console.log(`✅ Logged in as ${client.user.tag}`);
-    await updateDiscordChannel(); // Send initial message
-    await simulateDataChange();   // Start auto-updating
+    await fetchLatestMessage();
+    await updateDiscordChannel(await fetchLatestMessage());
 });
 
 // ✅ Start a simple Express Web Server (Prevents Render from stopping)
