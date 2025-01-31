@@ -3,7 +3,7 @@ const express = require("express");
 require("dotenv").config();
 
 const app = express();
-const PORT = process.env.PORT || 10000; // Render expects this
+const PORT = process.env.PORT || 10000; // Prevent Render shutdown
 
 // 🚀 Discord Bot Setup
 const client = new Client({
@@ -21,8 +21,22 @@ let lastSentMessageId = null; // Stores last message ID for updates
 
 // 🔹 User data (Stored in memory, updated in Discord)
 let userData = {
-    timestamp: new Date().toISOString(),
-    users: {} // Stores user activity data
+    "194999993143263241": {
+        "total_time": 2063.6601571292877,
+        "history": {
+            "2025-01-29": 1914.7335412502289,
+            "2025-01": 1914.7335412502289,
+            "2025-01-30": 31.397
+        }
+    },
+    "1296571757108658304": {
+        "total_time": 953.7574205875396,
+        "history": {
+            "2025-01-29": 867.5824205875397,
+            "2025-01": 867.5824205875397,
+            "2025-01-30": 86.175
+        }
+    }
 };
 
 // ✅ Function to Update Discord Message
@@ -30,7 +44,7 @@ async function updateDiscordChannel() {
     const channel = await client.channels.fetch(TEXT_CHANNEL_ID);
     if (!channel) return console.error("⚠️ Discord channel not found!");
 
-    let formattedText = `📢 **Updated Data:**\n\`\`\`json\n${JSON.stringify(userData, null, 2)}\n\`\`\``;
+    let formattedText = `📢 **Updated User Data:**\n\`\`\`json\n${JSON.stringify(userData, null, 2)}\n\`\`\``;
 
     try {
         if (lastSentMessageId) {
@@ -49,34 +63,16 @@ async function updateDiscordChannel() {
 
 // ✅ Function to Simulate Data Changes Every 10 Seconds
 async function simulateDataChange() {
-    console.log("🔄 Simulating data change...");
-    userData.timestamp = new Date().toISOString(); // Update timestamp
-    await updateDiscordChannel();
+    console.log("🔄 Checking for updates...");
+    
+    // Simulating data change (for testing)
+    const userIds = Object.keys(userData);
+    const randomUser = userIds[Math.floor(Math.random() * userIds.length)];
+    userData[randomUser].total_time += Math.random() * 50; // Increment random value
+
+    await updateDiscordChannel(); // Update Discord message
     setTimeout(simulateDataChange, 10000); // Runs every 10 seconds
 }
-
-// ✅ Track User Activity in Voice Channels
-client.on("voiceStateUpdate", async (oldState, newState) => {
-    const userId = newState.member.id;
-    const username = newState.member.user.username;
-    
-    if (newState.channel) {
-        userData.users[userId] = {
-            username: username,
-            joined: new Date().toISOString(),
-            status: "In Voice Channel"
-        };
-        console.log(`🎤 ${username} joined ${newState.channel.name}`);
-    } else {
-        if (userData.users[userId]) {
-            userData.users[userId].status = "Left Voice Channel";
-            userData.users[userId].left = new Date().toISOString();
-            console.log(`🚪 ${username} left voice channel`);
-        }
-    }
-
-    await updateDiscordChannel();
-});
 
 // ✅ Event: Bot is Ready
 client.once("ready", async () => {
