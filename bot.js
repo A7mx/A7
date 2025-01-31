@@ -3,9 +3,8 @@ const express = require("express");
 require("dotenv").config();
 
 const app = express();
-const PORT = process.env.PORT || 10000; // Prevent Render shutdown
+const PORT = process.env.PORT || 10000; // Keeps bot alive on Render
 
-// 🚀 Discord Bot Setup
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
@@ -18,10 +17,10 @@ const client = new Client({
 // 🔹 Replace with your Discord text channel ID
 const TEXT_CHANNEL_ID = "1328094647938973768"; 
 
-let lastSentMessageId = null; // Stores last message ID for updates
-const usersInVoice = {}; // Tracks when users join voice channels
+let lastSentMessageId = null;
+const usersInVoice = {};
 
-// ✅ Function to Fetch Latest Message from Discord Channel (Database)
+// ✅ Fetch the latest message from the text channel
 async function fetchLatestMessage() {
     try {
         const channel = await client.channels.fetch(TEXT_CHANNEL_ID);
@@ -45,10 +44,10 @@ async function fetchLatestMessage() {
     } catch (error) {
         console.error("⚠️ Error fetching message:", error);
     }
-    return {}; // Default empty data
+    return {};
 }
 
-// ✅ Function to Update or Create the Discord Message
+// ✅ Update or send a message containing the latest voice time data
 async function updateDiscordChannel(userData) {
     const channel = await client.channels.fetch(TEXT_CHANNEL_ID);
     if (!channel) return console.error("⚠️ Discord channel not found!");
@@ -67,11 +66,11 @@ async function updateDiscordChannel(userData) {
         }
     } catch (error) {
         console.error("⚠️ Error sending message:", error);
-        lastSentMessageId = null; // Reset message ID if it was deleted
+        lastSentMessageId = null; 
     }
 }
 
-// ✅ Event: User Joins/Leaves Voice Channel
+// ✅ Handle when a user joins or leaves a voice channel
 client.on("voiceStateUpdate", async (oldState, newState) => {
     let userData = await fetchLatestMessage();
 
@@ -86,15 +85,15 @@ client.on("voiceStateUpdate", async (oldState, newState) => {
     // 🎤 User joins a voice channel (Start tracking)
     if (newState.channel) {
         if (!usersInVoice[userId]) {
-            usersInVoice[userId] = Date.now(); // Store join time
+            usersInVoice[userId] = Date.now();
             console.log(`🎤 ${username} joined ${newState.channel.name}`);
         }
     }
 
     // 🚪 User leaves voice channel (Update time)
     if (!newState.channel && usersInVoice[userId]) {
-        const timeSpent = (Date.now() - usersInVoice[userId]) / 1000; // Time in seconds
-        usersInVoice[userId] = null; // Reset tracking
+        const timeSpent = (Date.now() - usersInVoice[userId]) / 1000; 
+        usersInVoice[userId] = null; 
 
         userData[userId].total_time += timeSpent;
         userData[userId].history[today] = (userData[userId].history[today] || 0) + timeSpent;
