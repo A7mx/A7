@@ -1,9 +1,21 @@
+const express = require("express");
 const { Client, GatewayIntentBits } = require("discord.js");
-const fs = require("fs");
-const path = require("path");
+const axios = require("axios");
 require("dotenv").config();
 
-// Define intents
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+// Web server to keep Render active
+app.get("/", (req, res) => {
+    res.send("✅ Discord bot is running!");
+});
+
+app.listen(PORT, () => {
+    console.log(`✅ Web server running on port ${PORT}`);
+});
+
+// Initialize Discord Bot
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
@@ -14,41 +26,47 @@ const client = new Client({
     ]
 });
 
-// File to store user voice time data
-const DATA_FILE = path.join(__dirname, "user_time_data.json");
+// ** Online Data Storage Link ** (Replace with your actual online JSON file URL)
+const DATA_FILE_URL = "https://www.editpad.org/?edit-id=i5IAo8Oxiib96493c2"; 
 
-// Load or initialize data
-let userTotalTime = {};
-if (fs.existsSync(DATA_FILE)) {
+// Load Data from Online File
+async function loadUserData() {
     try {
-        userTotalTime = JSON.parse(fs.readFileSync(DATA_FILE));
+        const response = await axios.get(DATA_FILE_URL);
+        return response.data || {};
     } catch (error) {
         console.error("⚠️ Error loading user data:", error);
-        userTotalTime = {};
+        return {};
+    }
+}
+
+// Save Data to Online File (Replace this with an actual writable API if needed)
+async function saveUserData(data) {
+    try {
+        await axios.post(DATA_FILE_URL, data, { headers: { "Content-Type": "application/json" } });
+        console.log("✅ User data saved!");
+    } catch (error) {
+        console.error("⚠️ Error saving user data:", error);
     }
 }
 
 // Users currently in voice channels (tracks when they joined)
 const usersInVoice = {};
 
-// Save user time data
-const saveUserTime = () => {
-    fs.writeFileSync(DATA_FILE, JSON.stringify(userTotalTime, null, 4));
-};
-
 // Ensure user data exists
-const ensureUserHistory = (userId) => {
+const ensureUserHistory = (userTotalTime, userId) => {
     if (!userTotalTime[userId]) {
         userTotalTime[userId] = { total_time: 0, history: {} };
     }
 };
 
 // ✅ Event: When a user joins or leaves a voice channel
-client.on("voiceStateUpdate", (oldState, newState) => {
+client.on("voiceStateUpdate", async (oldState, newState) => {
     const userId = newState.member.id;
-    ensureUserHistory(userId);
+    let userTotalTime = await loadUserData();
+    ensureUserHistory(userTotalTime, userId);
 
-    // 🎤 User joins a voice channel (or switches)
+    // 🎤 User joins a voice channel
     if (newState.channel) {
         if (!usersInVoice[userId]) {
             usersInVoice[userId] = Date.now(); // Start tracking time
@@ -67,7 +85,7 @@ client.on("voiceStateUpdate", (oldState, newState) => {
             userTotalTime[userId].history[today] = (userTotalTime[userId].history[today] || 0) + timeSpent;
 
             delete usersInVoice[userId]; // Remove from active tracking
-            saveUserTime();
+            await saveUserData(userTotalTime);
             console.log(`🚪 ${newState.member.displayName} left voice. Time added: ${timeSpent.toFixed(2)}s`);
         }
     }
@@ -79,10 +97,11 @@ client.on("messageCreate", async (message) => {
 
     const args = message.content.slice(1).trim().split(/ +/);
     const command = args.shift().toLowerCase();
+    let userTotalTime = await loadUserData();
 
     if (command === "alltime") {
         const user = message.mentions.users.first() || message.author;
-        ensureUserHistory(user.id);
+        ensureUserHistory(userTotalTime, user.id);
 
         const totalSeconds = userTotalTime[user.id].total_time || 0;
         const today = new Date().toISOString().split("T")[0];
@@ -100,7 +119,7 @@ client.on("messageCreate", async (message) => {
 
     if (command === "checkweek") {
         const user = message.mentions.users.first() || message.author;
-        ensureUserHistory(user.id);
+        ensureUserHistory(userTotalTime, user.id);
 
         const today = new Date();
         const weekDays = [...Array(7)].map((_, i) => {
