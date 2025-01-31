@@ -31,7 +31,15 @@ async function fetchLatestMessage() {
         for (const message of messages.values()) {
             if (message.author.id === client.user.id) {
                 lastSentMessageId = message.id;
-                return JSON.parse(message.content.replace(/```json|```/g, "").trim());
+                const content = message.content.replace(/```json|```/g, "").trim();
+                
+                try {
+                    const parsedData = JSON.parse(content);
+                    return parsedData;
+                } catch (error) {
+                    console.error("⚠️ JSON Parse Error: Message content is invalid JSON.");
+                    return {};
+                }
             }
         }
     } catch (error) {
