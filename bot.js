@@ -20,8 +20,8 @@ const client = new Client({
 const TEXT_CHANNEL_ID = "1324427183246282815"; // For tracking messages
 const DATABASE_CHANNEL_ID = "1335732990323593246"; // For storing data
 
-// 🔹 Set the Owner Role ID
-const OWNER_ROLE_ID = "1108295271101759499"; // Replace with the actual role ID
+// 🔹 Set the Admin Role ID
+const ADMIN_ROLE_ID = "1108295271101759499"; // Replace with the actual role ID
 
 // Track users currently in voice channels
 const usersInVoice = {};
@@ -69,7 +69,7 @@ async function saveUserData(userData) {
     }
 }
 
-// ✅ Format time into HH:mm:ss with two-digit seconds
+// ✅ Format time into HH:mm:ss with two-digit seconds (ensure seconds are integers)
 function formatTime(seconds) {
     const hours = Math.floor(seconds / 3600);
     const minutes = Math.floor((seconds % 3600) / 60);
@@ -78,31 +78,44 @@ function formatTime(seconds) {
     return `${hours}h ${minutes}m ${formattedSeconds}s`;
 }
 
-// ✅ Create an embed with a paginated dropdown menu of users with the Owner role
-async function showOwnerProfiles(interaction, page = 1) {
+// ✅ Create an embed with a searchable dropdown menu of users with the Admin role
+async function showAdminProfiles(interaction, query = "") {
     const guild = interaction.guild;
 
-    // Fetch members with the Owner role using the role ID
-    const membersWithRole = guild.members.cache.filter((member) => member.roles.cache.has(OWNER_ROLE_ID));
+    // Fetch members with the Admin role using the role ID
+    const membersWithRole = guild.members.cache.filter((member) => member.roles.cache.has(ADMIN_ROLE_ID));
     if (membersWithRole.size === 0) {
         return interaction.reply({
-            content: "❌ No members found with the Owner role.",
-            ephemeral: true,
+            content: "❌ No members found with the Admin role.",
+            flags: 64, // Ephemeral response
+        });
+    }
+
+    // Filter members based on the query
+    const filteredMembers = Array.from(membersWithRole.values()).filter((member) => {
+        const displayName = member.nickname || member.user.username;
+        return displayName.toLowerCase().includes(query.toLowerCase());
+    });
+
+    if (filteredMembers.length === 0) {
+        return interaction.reply({
+            content: "❌ No matching admins found.",
+            flags: 64, // Ephemeral response
         });
     }
 
     const pageSize = 25; // Maximum of 25 options per dropdown
-    const totalPages = Math.ceil(membersWithRole.size / pageSize);
+    const totalPages = Math.ceil(filteredMembers.length / pageSize);
 
     // Calculate the members to display on the current page
-    const start = (page - 1) * pageSize;
+    const start = 0; // Always start at the first page for simplicity
     const end = start + pageSize;
-    const pageMembers = Array.from(membersWithRole.values()).slice(start, end);
+    const pageMembers = filteredMembers.slice(start, end);
 
     // Create a dropdown menu with the current page's members
     const selectMenu = new StringSelectMenuBuilder()
-        .setCustomId(`owner_select_page_${page}`)
-        .setPlaceholder("Select an Owner to view their stats");
+        .setCustomId("admin_select")
+        .setPlaceholder("Select an Admin to view their stats");
 
     pageMembers.forEach((member) => {
         const userId = member.id;
@@ -113,31 +126,24 @@ async function showOwnerProfiles(interaction, page = 1) {
         });
     });
 
-    // Add pagination buttons
-    const prevButton = new ButtonBuilder()
-        .setCustomId("prev_page")
-        .setLabel("⬅️ Previous")
-        .setStyle(ButtonStyle.Primary)
-        .setDisabled(page === 1);
+    // Add a button for searching
+    const searchButton = new ButtonBuilder()
+        .setCustomId("search_admin")
+        .setLabel("🔍 Search Admins")
+        .setStyle(ButtonStyle.Primary);
 
-    const nextButton = new ButtonBuilder()
-        .setCustomId("next_page")
-        .setLabel("➡️ Next")
-        .setStyle(ButtonStyle.Primary)
-        .setDisabled(page === totalPages);
-
-    const paginationRow = new ActionRowBuilder().addComponents(prevButton, nextButton);
+    const actionRow = new ActionRowBuilder().addComponents(searchButton);
 
     // Create the embed
     const embed = new EmbedBuilder()
         .setTitle("👥 A7 Admin Checker | By @A7madShooter")
-        .setDescription(`Select a user from the dropdown to view their voice activity stats.\n*Page ${page} of ${totalPages}*`)
+        .setDescription(`Select an admin from the dropdown to view their voice activity stats.\n*Use the search button to filter admins.*`)
         .setColor("#0099ff");
 
     await interaction.reply({
         embeds: [embed],
-        components: [new ActionRowBuilder().addComponents(selectMenu), paginationRow],
-        ephemeral: true,
+        components: [new ActionRowBuilder().addComponents(selectMenu), actionRow],
+        flags: 64, // Ephemeral response
     });
 }
 
@@ -147,15 +153,15 @@ client.on("interactionCreate", async (interaction) => {
 
     const customId = interaction.customId;
 
-    // Handle owner selection from the dropdown
-    if (customId.startsWith("owner_select_page_")) {
+    // Handle admin selection from the dropdown
+    if (customId === "admin_select") {
         const selectedUserId = interaction.values[0]; // Get the selected user ID
         const userData = await fetchUserData();
         const user = userData[selectedUserId];
         if (!user) {
             return interaction.reply({
                 content: "❌ No data found for this user.",
-                ephemeral: true,
+                flags: 64, // Ephemeral response
             });
         }
 
@@ -188,15 +194,32 @@ client.on("interactionCreate", async (interaction) => {
         await interaction.reply({
             embeds: [embed],
             components: [actionRow],
-            ephemeral: true,
+            flags: 64, // Ephemeral response
         });
     }
 
-    // Handle pagination button clicks
-    if (customId === "prev_page" || customId === "next_page") {
-        const currentPage = parseInt(interaction.message.embeds[0].description.match(/Page (\d+)/)[1]);
-        const newPage = customId === "prev_page" ? currentPage - 1 : currentPage + 1;
-        await interaction.update(await showOwnerProfiles(interaction, newPage));
+    // Handle search button click
+    if (customId === "search_admin") {
+        const modal = new ModalBuilder()
+            .setCustomId("search_modal")
+            .setTitle("Search Admins");
+
+        const searchInput = new TextInputBuilder()
+            .setCustomId("search_query")
+            .setLabel("Enter a name or nickname to search:")
+            .setStyle(TextInputStyle.Short)
+            .setRequired(true);
+
+        const actionRow = new ActionRowBuilder().addComponents(searchInput);
+        modal.addComponents(actionRow);
+
+        await interaction.showModal(modal);
+    }
+
+    // Handle modal submission
+    if (interaction.isModalSubmit() && interaction.customId === "search_modal") {
+        const query = interaction.fields.getTextInputValue("search_query");
+        await showAdminProfiles(interaction, query);
     }
 
     // Handle timeframe button clicks
@@ -208,7 +231,7 @@ client.on("interactionCreate", async (interaction) => {
         if (!user) {
             return interaction.reply({
                 content: "❌ No data found for this user.",
-                ephemeral: true,
+                flags: 64, // Ephemeral response
             });
         }
 
@@ -249,7 +272,7 @@ client.on("interactionCreate", async (interaction) => {
 
         await interaction.reply({
             embeds: [embed],
-            ephemeral: true,
+            flags: 64, // Ephemeral response
         });
     }
 });
@@ -271,7 +294,7 @@ function calculateMonthlyTime(history) {
 // ✅ Command to trigger the profile display
 client.on("messageCreate", async (message) => {
     if (message.content === "!admin") {
-        await showOwnerProfiles(message);
+        await showAdminProfiles(message);
     }
 });
 
