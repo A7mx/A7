@@ -1,4 +1,4 @@
-const { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder } = require("discord.js");
+const { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, StringSelectMenuBuilder, ButtonStyle } = require("discord.js");
 const express = require("express");
 require("dotenv").config();
 const app = express();
@@ -114,8 +114,8 @@ client.on("voiceStateUpdate", async (oldState, newState) => {
     }
 });
 
-// ✅ Create an embed with profile pictures of users with the Owner role
-async function showOwnerProfiles(interaction, page = 1) {
+// ✅ Create an embed with a dropdown menu of users with the Owner role
+async function showOwnerProfiles(interaction) {
     const guild = interaction.guild;
 
     // Fetch members with the Owner role using the role ID
@@ -127,83 +127,46 @@ async function showOwnerProfiles(interaction, page = 1) {
         });
     }
 
-    const pageSize = 25; // Number of members per page
-    const totalPages = Math.ceil(membersWithRole.size / pageSize);
+    // Create a dropdown menu with all members
+    const selectMenu = new StringSelectMenuBuilder()
+        .setCustomId("owner_select")
+        .setPlaceholder("Select an Owner to view their stats");
 
-    // Calculate the members to display on the current page
-    const start = (page - 1) * pageSize;
-    const end = start + pageSize;
-    const pageMembers = Array.from(membersWithRole.values()).slice(start, end);
-
-    // Create buttons for each member
-    const buttons = [];
-    pageMembers.forEach((member) => {
+    membersWithRole.forEach((member) => {
         const userId = member.id;
         const displayName = member.nickname || member.user.username;
-        const isOnline = member.presence?.status === "online";
-        buttons.push(
-            new ButtonBuilder()
-                .setCustomId(`user_${userId}`)
-                .setLabel(displayName)
-                .setStyle(isOnline ? ButtonStyle.Success : ButtonStyle.Secondary)
-        );
+        selectMenu.addOptions({
+            label: displayName,
+            value: userId,
+        });
     });
 
-    // Split buttons into rows (max 5 buttons per row)
-    const actionRows = [];
-    for (let i = 0; i < buttons.length; i += 5) {
-        const row = new ActionRowBuilder().addComponents(buttons.slice(i, i + 5));
-        actionRows.push(row);
-    }
-
-    // Add pagination buttons
-    const paginationRow = new ActionRowBuilder().addComponents(
-        new ButtonBuilder()
-            .setCustomId("prev_page")
-            .setLabel("⬅️ Previous")
-            .setStyle(ButtonStyle.Primary)
-            .setDisabled(page === 1),
-        new ButtonBuilder()
-            .setCustomId("next_page")
-            .setLabel("➡️ Next")
-            .setStyle(ButtonStyle.Primary)
-            .setDisabled(page === totalPages)
-    );
-
-    actionRows.push(paginationRow);
+    const actionRow = new ActionRowBuilder().addComponents(selectMenu);
 
     // Create the embed
     const embed = new EmbedBuilder()
         .setTitle("👥 A7 Admin Checker | By @A7madShooter")
-        .setDescription(`Click on a user's name to view their voice activity stats.\n*Page ${page} of ${totalPages}*`)
+        .setDescription("Select a user from the dropdown to view their voice activity stats.")
         .setColor("#0099ff");
 
     await interaction.reply({
         embeds: [embed],
-        components: actionRows,
+        components: [actionRow],
         ephemeral: true,
     });
 }
 
-// ✅ Handle button clicks to show user stats
+// ✅ Handle dropdown selection to show user stats
 client.on("interactionCreate", async (interaction) => {
-    if (!interaction.isButton()) return;
+    if (!interaction.isStringSelectMenu()) return;
 
     const customId = interaction.customId;
 
-    // Handle pagination
-    if (customId === "prev_page" || customId === "next_page") {
-        const currentPage = parseInt(interaction.message.embeds[0].description.match(/Page (\d+)/)[1]);
-        const newPage = customId === "prev_page" ? currentPage - 1 : currentPage + 1;
-        await interaction.update(await showOwnerProfiles(interaction, newPage));
-        return;
-    }
-
-    // Handle user profile button clicks
-    if (customId.startsWith("user_")) {
-        const userId = customId.split("_")[1];
+    // Handle owner selection from the dropdown
+    if (customId === "owner_select") {
+        const selectedUserId = interaction.values[0]; // Get the selected user ID
         const userData = await fetchUserData();
-        const user = userData[userId];
+        const user = userData[selectedUserId];
         if (!user) {
             return interaction.reply({
                 content: "❌ No data found for this user.",
@@ -213,19 +176,19 @@ client.on("interactionCreate", async (interaction) => {
 
         // Create buttons for timeframes
         const dayButton = new ButtonBuilder()
-            .setCustomId(`day_${userId}`)
+            .setCustomId(`day_${selectedUserId}`)
             .setLabel("📅 Day")
             .setStyle(ButtonStyle.Primary);
         const weekButton = new ButtonBuilder()
-            .setCustomId(`week_${userId}`)
+            .setCustomId(`week_${selectedUserId}`)
             .setLabel("🗓️ Week")
             .setStyle(ButtonStyle.Primary);
         const monthButton = new ButtonBuilder()
-            .setCustomId(`month_${userId}`)
+            .setCustomId(`month_${selectedUserId}`)
             .setLabel("🗓️ Month")
             .setStyle(ButtonStyle.Primary);
         const allTimeButton = new ButtonBuilder()
-            .setCustomId(`alltime_${userId}`)
+            .setCustomId(`alltime_${selectedUserId}`)
             .setLabel("⏳ All Time")
             .setStyle(ButtonStyle.Primary);
 
@@ -235,7 +198,7 @@ client.on("interactionCreate", async (interaction) => {
             .setTitle(`📊 Select a Timeframe for ${user.username}`)
             .setDescription("Choose a timeframe to view voice activity stats.")
             .setColor("#0099ff")
-            .setThumbnail(interaction.guild.members.cache.get(userId)?.user.displayAvatarURL({ dynamic: true }));
+            .setThumbnail(interaction.guild.members.cache.get(selectedUserId)?.user.displayAvatarURL({ dynamic: true }));
 
         await interaction.reply({
             embeds: [embed],
@@ -245,8 +208,9 @@ client.on("interactionCreate", async (interaction) => {
     }
 
     // Handle timeframe button clicks
-    if (customId.startsWith("day_") || customId.startsWith("week_") || customId.startsWith("month_") || customId.startsWith("alltime_")) {
-        const userId = customId.split("_")[1];
+    if (interaction.customId.startsWith("day_") || interaction.customId.startsWith("week_") ||
+        interaction.customId.startsWith("month_") || interaction.customId.startsWith("alltime_")) {
+        const userId = interaction.customId.split("_")[1];
         const userData = await fetchUserData();
         const user = userData[userId];
         if (!user) {
@@ -259,11 +223,11 @@ client.on("interactionCreate", async (interaction) => {
         let timeframeLabel = "";
         let timeframeData = "";
 
-        if (customId.startsWith("day_")) {
+        if (interaction.customId.startsWith("day_")) {
             const today = new Date().toISOString().split("T")[0];
             timeframeLabel = "🕒 Today";
             timeframeData = formatTime(user.history[today] || 0);
-        } else if (customId.startsWith("week_")) {
+        } else if (interaction.customId.startsWith("week_")) {
             timeframeLabel = "📅 Weekly Breakdown";
             const today = new Date();
             let weeklyBreakdown = "";
@@ -276,10 +240,10 @@ client.on("interactionCreate", async (interaction) => {
                 weeklyBreakdown += `📆 **${dayName} (${day})**: ${dayTime}\n`;
             }
             timeframeData = weeklyBreakdown || "No data for the past 7 days.";
-        } else if (customId.startsWith("month_")) {
+        } else if (interaction.customId.startsWith("month_")) {
             timeframeLabel = "🗓️ This Month";
             timeframeData = formatTime(calculateMonthlyTime(user.history));
-        } else if (customId.startsWith("alltime_")) {
+        } else if (interaction.customId.startsWith("alltime_")) {
             timeframeLabel = "⏳ All Time";
             timeframeData = formatTime(user.total_time);
         }
