@@ -1,4 +1,4 @@
-const { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, StringSelectMenuBuilder, ButtonStyle } = require("discord.js");
+const { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, StringSelectMenuBuilder, ButtonBuilder, ButtonStyle } = require("discord.js");
 const express = require("express");
 require("dotenv").config();
 const app = express();
@@ -78,44 +78,8 @@ function formatTime(seconds) {
     return `${hours}h ${minutes}m ${formattedSeconds}s`;
 }
 
-// ✅ Track users joining/leaving voice channels
-client.on("voiceStateUpdate", async (oldState, newState) => {
-    const userId = newState.member?.id || oldState.member?.id;
-    const username = newState.member?.user?.username || oldState.member?.user?.username;
-    if (!userId || !username) return;
-
-    let userData = await fetchUserData();
-
-    // 🎤 User joins voice (Start timer)
-    if (newState.channel && !usersInVoice[userId]) {
-        usersInVoice[userId] = Date.now();
-        console.log(`🎤 ${username} joined ${newState.channel.name}`);
-    }
-
-    // 🚪 User leaves voice (Stop timer and update time)
-    if ((!newState.channel && oldState.channel) && usersInVoice[userId]) {
-        const timeSpent = (Date.now() - usersInVoice[userId]) / 1000;
-        delete usersInVoice[userId];
-        if (timeSpent > 10) {
-            // Ignore if user left instantly
-            if (!userData[userId]) {
-                userData[userId] = {
-                    username,
-                    total_time: 0,
-                    history: {},
-                };
-            }
-            const today = new Date().toISOString().split("T")[0];
-            userData[userId].total_time += timeSpent;
-            userData[userId].history[today] = (userData[userId].history[today] || 0) + timeSpent;
-            await saveUserData(userData);
-            console.log(`🚪 ${username} left voice channel. Time added: ${Math.floor(timeSpent / 60)} min`);
-        }
-    }
-});
-
-// ✅ Create an embed with a dropdown menu of users with the Owner role
-async function showOwnerProfiles(interaction) {
+// ✅ Create an embed with a paginated dropdown menu of users with the Owner role
+async function showOwnerProfiles(interaction, page = 1) {
     const guild = interaction.guild;
 
     // Fetch members with the Owner role using the role ID
@@ -127,12 +91,20 @@ async function showOwnerProfiles(interaction) {
         });
     }
 
-    // Create a dropdown menu with all members
+    const pageSize = 25; // Maximum of 25 options per dropdown
+    const totalPages = Math.ceil(membersWithRole.size / pageSize);
+
+    // Calculate the members to display on the current page
+    const start = (page - 1) * pageSize;
+    const end = start + pageSize;
+    const pageMembers = Array.from(membersWithRole.values()).slice(start, end);
+
+    // Create a dropdown menu with the current page's members
     const selectMenu = new StringSelectMenuBuilder()
-        .setCustomId("owner_select")
+        .setCustomId(`owner_select_page_${page}`)
         .setPlaceholder("Select an Owner to view their stats");
 
-    membersWithRole.forEach((member) => {
+    pageMembers.forEach((member) => {
         const userId = member.id;
         const displayName = member.nickname || member.user.username;
         selectMenu.addOptions({
@@ -141,29 +113,42 @@ async function showOwnerProfiles(interaction) {
         });
     });
 
-    const actionRow = new ActionRowBuilder().addComponents(selectMenu);
+    // Add pagination buttons
+    const prevButton = new ButtonBuilder()
+        .setCustomId("prev_page")
+        .setLabel("⬅️ Previous")
+        .setStyle(ButtonStyle.Primary)
+        .setDisabled(page === 1);
+
+    const nextButton = new ButtonBuilder()
+        .setCustomId("next_page")
+        .setLabel("➡️ Next")
+        .setStyle(ButtonStyle.Primary)
+        .setDisabled(page === totalPages);
+
+    const paginationRow = new ActionRowBuilder().addComponents(prevButton, nextButton);
 
     // Create the embed
     const embed = new EmbedBuilder()
         .setTitle("👥 A7 Admin Checker | By @A7madShooter")
-        .setDescription("Select a user from the dropdown to view their voice activity stats.")
+        .setDescription(`Select a user from the dropdown to view their voice activity stats.\n*Page ${page} of ${totalPages}*`)
         .setColor("#0099ff");
 
     await interaction.reply({
         embeds: [embed],
-        components: [actionRow],
+        components: [new ActionRowBuilder().addComponents(selectMenu), paginationRow],
         ephemeral: true,
     });
 }
 
-// ✅ Handle dropdown selection to show user stats
+// ✅ Handle interactions
 client.on("interactionCreate", async (interaction) => {
-    if (!interaction.isStringSelectMenu()) return;
+    if (!interaction.isStringSelectMenu() && !interaction.isButton()) return;
 
     const customId = interaction.customId;
 
     // Handle owner selection from the dropdown
-    if (customId === "owner_select") {
+    if (customId.startsWith("owner_select_page_")) {
         const selectedUserId = interaction.values[0]; // Get the selected user ID
         const userData = await fetchUserData();
         const user = userData[selectedUserId];
@@ -207,10 +192,17 @@ client.on("interactionCreate", async (interaction) => {
         });
     }
 
+    // Handle pagination button clicks
+    if (customId === "prev_page" || customId === "next_page") {
+        const currentPage = parseInt(interaction.message.embeds[0].description.match(/Page (\d+)/)[1]);
+        const newPage = customId === "prev_page" ? currentPage - 1 : currentPage + 1;
+        await interaction.update(await showOwnerProfiles(interaction, newPage));
+    }
+
     // Handle timeframe button clicks
-    if (interaction.customId.startsWith("day_") || interaction.customId.startsWith("week_") ||
-        interaction.customId.startsWith("month_") || interaction.customId.startsWith("alltime_")) {
-        const userId = interaction.customId.split("_")[1];
+    if (customId.startsWith("day_") || customId.startsWith("week_") ||
+        customId.startsWith("month_") || customId.startsWith("alltime_")) {
+        const userId = customId.split("_")[1];
         const userData = await fetchUserData();
         const user = userData[userId];
         if (!user) {
@@ -223,11 +215,11 @@ client.on("interactionCreate", async (interaction) => {
         let timeframeLabel = "";
         let timeframeData = "";
 
-        if (interaction.customId.startsWith("day_")) {
+        if (customId.startsWith("day_")) {
             const today = new Date().toISOString().split("T")[0];
             timeframeLabel = "🕒 Today";
             timeframeData = formatTime(user.history[today] || 0);
-        } else if (interaction.customId.startsWith("week_")) {
+        } else if (customId.startsWith("week_")) {
             timeframeLabel = "📅 Weekly Breakdown";
             const today = new Date();
             let weeklyBreakdown = "";
@@ -240,10 +232,10 @@ client.on("interactionCreate", async (interaction) => {
                 weeklyBreakdown += `📆 **${dayName} (${day})**: ${dayTime}\n`;
             }
             timeframeData = weeklyBreakdown || "No data for the past 7 days.";
-        } else if (interaction.customId.startsWith("month_")) {
+        } else if (customId.startsWith("month_")) {
             timeframeLabel = "🗓️ This Month";
             timeframeData = formatTime(calculateMonthlyTime(user.history));
-        } else if (interaction.customId.startsWith("alltime_")) {
+        } else if (customId.startsWith("alltime_")) {
             timeframeLabel = "⏳ All Time";
             timeframeData = formatTime(user.total_time);
         }
