@@ -1,4 +1,4 @@
-const { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require("discord.js");
+const { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder } = require("discord.js");
 const express = require("express");
 require("dotenv").config();
 const app = express();
@@ -31,14 +31,12 @@ async function fetchUserData() {
     try {
         const channel = await client.channels.fetch(DATABASE_CHANNEL_ID);
         if (!channel) return console.error("⚠️ Database channel not found!");
-
         const messages = await channel.messages.fetch({ limit: 1 });
         if (messages.size === 0) {
             // No messages in the database channel, create a new one
             const sentMessage = await channel.send("```json\n{}\n```");
             return {};
         }
-
         const latestMessage = messages.first();
         const content = latestMessage.content.trim();
         if (content.startsWith("```json") && content.endsWith("```")) {
@@ -56,10 +54,8 @@ async function saveUserData(userData) {
     try {
         const channel = await client.channels.fetch(DATABASE_CHANNEL_ID);
         if (!channel) return console.error("⚠️ Database channel not found!");
-
         const messages = await channel.messages.fetch({ limit: 1 });
         const jsonContent = "```json\n" + JSON.stringify(userData, null, 2) + "\n```";
-
         if (messages.size === 0) {
             // No messages in the database channel, create a new one
             await channel.send(jsonContent);
@@ -73,7 +69,7 @@ async function saveUserData(userData) {
     }
 }
 
-// ✅ Format time into HH:mm:ss with two-digit seconds (ensure seconds are integers)
+// ✅ Format time into HH:mm:ss with two-digit seconds
 function formatTime(seconds) {
     const hours = Math.floor(seconds / 3600);
     const minutes = Math.floor((seconds % 3600) / 60);
@@ -119,7 +115,7 @@ client.on("voiceStateUpdate", async (oldState, newState) => {
 });
 
 // ✅ Create an embed with profile pictures of users with the Owner role
-async function showOwnerProfiles(interaction) {
+async function showOwnerProfiles(interaction, page = 1) {
     const guild = interaction.guild;
 
     // Fetch members with the Owner role using the role ID
@@ -127,29 +123,28 @@ async function showOwnerProfiles(interaction) {
     if (membersWithRole.size === 0) {
         return interaction.reply({
             content: "❌ No members found with the Owner role.",
-            flags: 64, // Ephemeral response
+            ephemeral: true,
         });
     }
 
-    const userData = await fetchUserData();
+    const pageSize = 25; // Number of members per page
+    const totalPages = Math.ceil(membersWithRole.size / pageSize);
 
-    // Create an embed with profile pictures and buttons
-    const embed = new EmbedBuilder()
-        .setTitle("👥 A7 Admin Checker | By @A7madShooter")
-        .setDescription("Click on a user's name to view their voice activity stats.")
-        .setColor("#0099ff");
+    // Calculate the members to display on the current page
+    const start = (page - 1) * pageSize;
+    const end = start + pageSize;
+    const pageMembers = Array.from(membersWithRole.values()).slice(start, end);
 
+    // Create buttons for each member
     const buttons = [];
-    membersWithRole.forEach((member) => {
+    pageMembers.forEach((member) => {
         const userId = member.id;
-        const displayName = member.nickname || member.user.username; // Use nickname if available, otherwise username
+        const displayName = member.nickname || member.user.username;
         const isOnline = member.presence?.status === "online";
-
-        // Add a button for each owner
         buttons.push(
             new ButtonBuilder()
                 .setCustomId(`user_${userId}`)
-                .setLabel(displayName) // Use nickname or username
+                .setLabel(displayName)
                 .setStyle(isOnline ? ButtonStyle.Success : ButtonStyle.Secondary)
         );
     });
@@ -161,9 +156,32 @@ async function showOwnerProfiles(interaction) {
         actionRows.push(row);
     }
 
+    // Add pagination buttons
+    const paginationRow = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+            .setCustomId("prev_page")
+            .setLabel("⬅️ Previous")
+            .setStyle(ButtonStyle.Primary)
+            .setDisabled(page === 1),
+        new ButtonBuilder()
+            .setCustomId("next_page")
+            .setLabel("➡️ Next")
+            .setStyle(ButtonStyle.Primary)
+            .setDisabled(page === totalPages)
+    );
+
+    actionRows.push(paginationRow);
+
+    // Create the embed
+    const embed = new EmbedBuilder()
+        .setTitle("👥 A7 Admin Checker | By @A7madShooter")
+        .setDescription(`Click on a user's name to view their voice activity stats.\n*Page ${page} of ${totalPages}*`)
+        .setColor("#0099ff");
+
     await interaction.reply({
         embeds: [embed],
         components: actionRows,
+        ephemeral: true,
     });
 }
 
@@ -173,35 +191,39 @@ client.on("interactionCreate", async (interaction) => {
 
     const customId = interaction.customId;
 
+    // Handle pagination
+    if (customId === "prev_page" || customId === "next_page") {
+        const currentPage = parseInt(interaction.message.embeds[0].description.match(/Page (\d+)/)[1]);
+        const newPage = customId === "prev_page" ? currentPage - 1 : currentPage + 1;
+        await interaction.update(await showOwnerProfiles(interaction, newPage));
+        return;
+    }
+
     // Handle user profile button clicks
     if (customId.startsWith("user_")) {
         const userId = customId.split("_")[1];
         const userData = await fetchUserData();
         const user = userData[userId];
-
         if (!user) {
             return interaction.reply({
                 content: "❌ No data found for this user.",
-                flags: 64, // Ephemeral response
+                ephemeral: true,
             });
         }
 
-        // Create three new buttons for Day, Week, Month, and All Time
+        // Create buttons for timeframes
         const dayButton = new ButtonBuilder()
             .setCustomId(`day_${userId}`)
             .setLabel("📅 Day")
             .setStyle(ButtonStyle.Primary);
-
         const weekButton = new ButtonBuilder()
             .setCustomId(`week_${userId}`)
             .setLabel("🗓️ Week")
             .setStyle(ButtonStyle.Primary);
-
         const monthButton = new ButtonBuilder()
             .setCustomId(`month_${userId}`)
             .setLabel("🗓️ Month")
             .setStyle(ButtonStyle.Primary);
-
         const allTimeButton = new ButtonBuilder()
             .setCustomId(`alltime_${userId}`)
             .setLabel("⏳ All Time")
@@ -218,7 +240,7 @@ client.on("interactionCreate", async (interaction) => {
         await interaction.reply({
             embeds: [embed],
             components: [actionRow],
-            flags: 64, // Ephemeral response
+            ephemeral: true,
         });
     }
 
@@ -227,11 +249,10 @@ client.on("interactionCreate", async (interaction) => {
         const userId = customId.split("_")[1];
         const userData = await fetchUserData();
         const user = userData[userId];
-
         if (!user) {
             return interaction.reply({
                 content: "❌ No data found for this user.",
-                flags: 64, // Ephemeral response
+                ephemeral: true,
             });
         }
 
@@ -272,7 +293,7 @@ client.on("interactionCreate", async (interaction) => {
 
         await interaction.reply({
             embeds: [embed],
-            flags: 64, // Ephemeral response
+            ephemeral: true,
         });
     }
 });
@@ -282,7 +303,6 @@ function calculateMonthlyTime(history) {
     const today = new Date();
     const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
     let totalSeconds = 0;
-
     for (const day in history) {
         const date = new Date(day);
         if (date >= startOfMonth) {
@@ -308,7 +328,6 @@ client.once("ready", () => {
 app.get("/", (req, res) => {
     res.send("Bot is running!");
 });
-
 app.listen(PORT, () => {
     console.log(`🌐 Server is running on port ${PORT}`);
 });
