@@ -5,9 +5,8 @@ const {
     ActionRowBuilder,
     ButtonBuilder,
     ButtonStyle,
-    ModalBuilder,
-    TextInputBuilder,
-    TextInputStyle,
+    SlashCommandBuilder,
+    ApplicationCommandOptionType,
 } = require("discord.js");
 const express = require("express");
 require("dotenv").config();
@@ -124,126 +123,65 @@ client.on("voiceStateUpdate", async (oldState, newState) => {
     }
 });
 
-// ✅ Create an embed with profile pictures of users with the admin role
-async function showadminProfiles(interaction, query = "", page = 1) {
-    const guild = interaction.guild;
-
-    // Fetch members with the admin role using the role ID
-    const membersWithRole = guild.members.cache.filter((member) => member.roles.cache.has(admin_ROLE_ID));
-    if (membersWithRole.size === 0) {
-        return interaction.reply({
-            content: "❌ No members found with the admin role.",
-            flags: 64, // Ephemeral response
-        });
-    }
-
-    // Filter members based on the query
-    const filteredMembers = Array.from(membersWithRole.values()).filter((member) => {
-        const displayName = member.nickname || member.user.username;
-        return displayName.toLowerCase().includes(query.toLowerCase());
-    });
-
-    if (filteredMembers.length === 0) {
-        return interaction.reply({
-            content: "❌ No matching admins found.",
-            flags: 64, // Ephemeral response
-        });
-    }
-
-    const pageSize = 25; // Maximum of 25 options per dropdown
-    const totalPages = Math.ceil(filteredMembers.length / pageSize);
-
-    // Calculate the members to display on the current page
-    const start = (page - 1) * pageSize;
-    const end = start + pageSize;
-    const pageMembers = filteredMembers.slice(start, end);
-
-    // Create a dropdown menu with the current page's members
-    const selectMenu = new StringSelectMenuBuilder()
-        .setCustomId("admin_select")
-        .setPlaceholder("Select an admin to view their stats");
-
-    pageMembers.forEach((member) => {
-        const userId = member.id;
-        const displayName = member.nickname || member.user.username;
-        selectMenu.addOptions({
-            label: displayName,
-            value: userId,
-        });
-    });
-
-    // Add pagination buttons
-    const prevButton = new ButtonBuilder()
-        .setCustomId("prev_page")
-        .setLabel("⬅️ Previous")
-        .setStyle(ButtonStyle.Primary)
-        .setDisabled(page === 1);
-
-    const nextButton = new ButtonBuilder()
-        .setCustomId("next_page")
-        .setLabel("➡️ Next")
-        .setStyle(ButtonStyle.Primary)
-        .setDisabled(page === totalPages);
-
-    const paginationRow = new ActionRowBuilder().addComponents(prevButton, nextButton);
-
-    // Add a button for searching
-    const searchButton = new ButtonBuilder()
-        .setCustomId("search_admin")
-        .setLabel("🔍 Search admins")
-        .setStyle(ButtonStyle.Primary);
-
-    const actionRow = new ActionRowBuilder().addComponents(searchButton);
-
-    // Create the embed
-    const embed = new EmbedBuilder()
-        .setTitle("👥 A7 Admin Checker | By @A7madShooter")
-        .setDescription(`Select an admin from the dropdown to view their voice activity stats.\n*Page ${page} of ${totalPages}*`)
-        .setColor("#0099ff");
-
-    await interaction.reply({
-        embeds: [embed],
-        components: [new ActionRowBuilder().addComponents(selectMenu), paginationRow, actionRow],
-        flags: 64, // Ephemeral response
-    });
-}
-
-// ✅ Handle interactions
+// ✅ Handle slash command for searching admins
 client.on("interactionCreate", async (interaction) => {
-    if (!interaction.isStringSelectMenu() && !interaction.isButton() && !interaction.isModalSubmit()) return;
+    if (!interaction.isCommand() && !interaction.isAutocomplete()) return;
 
-    const customId = interaction.customId;
+    const { commandName, options } = interaction;
 
-    // Defer the reply to allow time for processing
-    await interaction.deferReply({ flags: 64 });
+    // Handle autocomplete for the search command
+    if (interaction.isAutocomplete()) {
+        const focusedValue = interaction.options.getFocused();
+        const guild = interaction.guild;
 
-    // Handle admin selection from the dropdown
-    if (customId === "admin_select") {
-        const selectedUserId = interaction.values[0]; // Get the selected user ID
+        // Fetch members with the admin role
+        const membersWithRole = guild.members.cache.filter((member) => member.roles.cache.has(admin_ROLE_ID));
+        const filteredMembers = Array.from(membersWithRole.values())
+            .filter((member) => {
+                const displayName = member.nickname || member.user.username;
+                return displayName.toLowerCase().includes(focusedValue.toLowerCase());
+            })
+            .map((member) => ({
+                name: member.nickname || member.user.username,
+                value: member.id,
+            }));
+
+        // Limit to 25 suggestions (Discord's maximum)
+        await interaction.respond(filteredMembers.slice(0, 25));
+        return;
+    }
+
+    // Handle the search command
+    if (commandName === "search") {
+        const userId = options.getString("name");
         const userData = await fetchUserData();
-        const user = userData[selectedUserId];
+        const user = userData[userId];
+
         if (!user) {
-            return interaction.editReply({
+            return interaction.reply({
                 content: "❌ No data found for this user.",
-                flags: 64, // Ephemeral response
+                ephemeral: true,
             });
         }
 
         // Create buttons for timeframes
         const dayButton = new ButtonBuilder()
-            .setCustomId(`day_${selectedUserId}`)
+            .setCustomId(`day_${userId}`)
             .setLabel("📅 Day")
             .setStyle(ButtonStyle.Primary);
+
         const weekButton = new ButtonBuilder()
-            .setCustomId(`week_${selectedUserId}`)
+            .setCustomId(`week_${userId}`)
             .setLabel("🗓️ Week")
             .setStyle(ButtonStyle.Primary);
+
         const monthButton = new ButtonBuilder()
-            .setCustomId(`month_${selectedUserId}`)
+            .setCustomId(`month_${userId}`)
             .setLabel("🗓️ Month")
             .setStyle(ButtonStyle.Primary);
+
         const allTimeButton = new ButtonBuilder()
-            .setCustomId(`alltime_${selectedUserId}`)
+            .setCustomId(`alltime_${userId}`)
             .setLabel("⏳ All Time")
             .setStyle(ButtonStyle.Primary);
 
@@ -253,67 +191,39 @@ client.on("interactionCreate", async (interaction) => {
             .setTitle(`📊 Select a Timeframe for ${user.username}`)
             .setDescription("Choose a timeframe to view voice activity stats.")
             .setColor("#0099ff")
-            .setThumbnail(interaction.guild.members.cache.get(selectedUserId)?.user.displayAvatarURL({ dynamic: true }));
+            .setThumbnail(interaction.guild.members.cache.get(userId)?.user.displayAvatarURL({ dynamic: true }));
 
-        await interaction.editReply({
+        await interaction.reply({
             embeds: [embed],
             components: [actionRow],
-            flags: 64, // Ephemeral response
+            ephemeral: true,
         });
     }
 
-    // Handle pagination button clicks
-    if (customId === "prev_page" || customId === "next_page") {
-        const currentPage = parseInt(interaction.message.embeds[0].description.match(/Page (\d+)/)[1]);
-        const newPage = customId === "prev_page" ? currentPage - 1 : currentPage + 1;
-        await interaction.editReply(await showadminProfiles(interaction, "", newPage));
-    }
-
-    // Handle search button click
-    if (customId === "search_admin") {
-        const modal = new ModalBuilder()
-            .setCustomId("search_modal")
-            .setTitle("Search admins");
-
-        const searchInput = new TextInputBuilder()
-            .setCustomId("search_query")
-            .setLabel("Enter a name or nickname to search:")
-            .setStyle(TextInputStyle.Short)
-            .setRequired(true);
-
-        const actionRow = new ActionRowBuilder().addComponents(searchInput);
-        modal.addComponents(actionRow);
-
-        await interaction.showModal(modal);
-    }
-
-    // Handle modal submission
-    if (interaction.isModalSubmit() && interaction.customId === "search_modal") {
-        const query = interaction.fields.getTextInputValue("search_query");
-        await showadminProfiles(interaction, query);
-    }
-
     // Handle timeframe button clicks
-    if (customId.startsWith("day_") || customId.startsWith("week_") ||
-        customId.startsWith("month_") || customId.startsWith("alltime_")) {
-        const userId = customId.split("_")[1];
+    if (interaction.isButton() && (interaction.customId.startsWith("day_") ||
+        interaction.customId.startsWith("week_") ||
+        interaction.customId.startsWith("month_") ||
+        interaction.customId.startsWith("alltime_"))) {
+        const userId = interaction.customId.split("_")[1];
         const userData = await fetchUserData();
         const user = userData[userId];
+
         if (!user) {
-            return interaction.editReply({
+            return interaction.reply({
                 content: "❌ No data found for this user.",
-                flags: 64, // Ephemeral response
+                ephemeral: true,
             });
         }
 
         let timeframeLabel = "";
         let timeframeData = "";
 
-        if (customId.startsWith("day_")) {
+        if (interaction.customId.startsWith("day_")) {
             const today = new Date().toISOString().split("T")[0];
             timeframeLabel = "🕒 Today";
             timeframeData = formatTime(user.history[today] || 0);
-        } else if (customId.startsWith("week_")) {
+        } else if (interaction.customId.startsWith("week_")) {
             timeframeLabel = "📅 Weekly Breakdown";
             const today = new Date();
             let weeklyBreakdown = "";
@@ -326,10 +236,10 @@ client.on("interactionCreate", async (interaction) => {
                 weeklyBreakdown += `📆 **${dayName} (${day})**: ${dayTime}\n`;
             }
             timeframeData = weeklyBreakdown || "No data for the past 7 days.";
-        } else if (customId.startsWith("month_")) {
+        } else if (interaction.customId.startsWith("month_")) {
             timeframeLabel = "🗓️ This Month";
             timeframeData = formatTime(calculateMonthlyTime(user.history));
-        } else if (customId.startsWith("alltime_")) {
+        } else if (interaction.customId.startsWith("alltime_")) {
             timeframeLabel = "⏳ All Time";
             timeframeData = formatTime(user.total_time);
         }
@@ -341,9 +251,9 @@ client.on("interactionCreate", async (interaction) => {
             .setColor("#0099ff")
             .setThumbnail(interaction.guild.members.cache.get(userId)?.user.displayAvatarURL({ dynamic: true }));
 
-        await interaction.editReply({
+        await interaction.reply({
             embeds: [embed],
-            flags: 64, // Ephemeral response
+            ephemeral: true,
         });
     }
 });
@@ -362,16 +272,24 @@ function calculateMonthlyTime(history) {
     return totalSeconds;
 }
 
-// ✅ Command to trigger the profile display
-client.on("messageCreate", async (message) => {
-    if (message.content === "!admin") {
-        await showadminProfiles(message);
-    }
-});
-
-// ✅ Start Bot
-client.once("ready", () => {
+// ✅ Register slash commands
+client.once("ready", async () => {
     console.log(`✅ Logged in as ${client.user.tag}`);
+
+    // Define the search command
+    const searchCommand = new SlashCommandBuilder()
+        .setName("search")
+        .setDescription("Search for an admin by name or nickname.")
+        .addStringOption((option) =>
+            option
+                .setName("name")
+                .setDescription("The name or nickname of the admin to search for.")
+                .setRequired(true)
+                .setAutocomplete(true)
+        );
+
+    // Register the command globally
+    await client.application.commands.create(searchCommand);
 });
 
 // ✅ Dummy Express server to satisfy Render's port requirement
