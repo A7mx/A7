@@ -1,4 +1,15 @@
-const { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, StringSelectMenuBuilder, ButtonBuilder, ButtonStyle } = require("discord.js");
+const {
+    Client,
+    GatewayIntentBits,
+    EmbedBuilder,
+    ActionRowBuilder,
+    StringSelectMenuBuilder,
+    ButtonBuilder,
+    ButtonStyle,
+    ModalBuilder,
+    TextInputBuilder,
+    TextInputStyle,
+} = require("discord.js");
 const express = require("express");
 require("dotenv").config();
 const app = express();
@@ -79,7 +90,7 @@ function formatTime(seconds) {
 }
 
 // ✅ Create an embed with a searchable dropdown menu of users with the Admin role
-async function showAdminProfiles(interaction, query = "") {
+async function showAdminProfiles(interaction, query = "", page = 1) {
     const guild = interaction.guild;
 
     // Fetch members with the Admin role using the role ID
@@ -108,13 +119,13 @@ async function showAdminProfiles(interaction, query = "") {
     const totalPages = Math.ceil(filteredMembers.length / pageSize);
 
     // Calculate the members to display on the current page
-    const start = 0; // Always start at the first page for simplicity
+    const start = (page - 1) * pageSize;
     const end = start + pageSize;
     const pageMembers = filteredMembers.slice(start, end);
 
     // Create a dropdown menu with the current page's members
     const selectMenu = new StringSelectMenuBuilder()
-        .setCustomId("admin_select")
+        .setCustomId(`admin_select_page_${page}`)
         .setPlaceholder("Select an Admin to view their stats");
 
     pageMembers.forEach((member) => {
@@ -125,6 +136,21 @@ async function showAdminProfiles(interaction, query = "") {
             value: userId,
         });
     });
+
+    // Add pagination buttons
+    const prevButton = new ButtonBuilder()
+        .setCustomId("prev_page")
+        .setLabel("⬅️ Previous")
+        .setStyle(ButtonStyle.Primary)
+        .setDisabled(page === 1);
+
+    const nextButton = new ButtonBuilder()
+        .setCustomId("next_page")
+        .setLabel("➡️ Next")
+        .setStyle(ButtonStyle.Primary)
+        .setDisabled(page === totalPages);
+
+    const paginationRow = new ActionRowBuilder().addComponents(prevButton, nextButton);
 
     // Add a button for searching
     const searchButton = new ButtonBuilder()
@@ -137,29 +163,32 @@ async function showAdminProfiles(interaction, query = "") {
     // Create the embed
     const embed = new EmbedBuilder()
         .setTitle("👥 A7 Admin Checker | By @A7madShooter")
-        .setDescription(`Select an admin from the dropdown to view their voice activity stats.\n*Use the search button to filter admins.*`)
+        .setDescription(`Select an admin from the dropdown to view their voice activity stats.\n*Page ${page} of ${totalPages}*`)
         .setColor("#0099ff");
 
     await interaction.reply({
         embeds: [embed],
-        components: [new ActionRowBuilder().addComponents(selectMenu), actionRow],
+        components: [new ActionRowBuilder().addComponents(selectMenu), paginationRow, actionRow],
         flags: 64, // Ephemeral response
     });
 }
 
 // ✅ Handle interactions
 client.on("interactionCreate", async (interaction) => {
-    if (!interaction.isStringSelectMenu() && !interaction.isButton()) return;
+    if (!interaction.isStringSelectMenu() && !interaction.isButton() && !interaction.isModalSubmit()) return;
 
     const customId = interaction.customId;
 
+    // Defer the reply to allow time for processing
+    await interaction.deferReply({ flags: 64 });
+
     // Handle admin selection from the dropdown
-    if (customId === "admin_select") {
+    if (customId.startsWith("admin_select_page_")) {
         const selectedUserId = interaction.values[0]; // Get the selected user ID
         const userData = await fetchUserData();
         const user = userData[selectedUserId];
         if (!user) {
-            return interaction.reply({
+            return interaction.editReply({
                 content: "❌ No data found for this user.",
                 flags: 64, // Ephemeral response
             });
@@ -191,11 +220,18 @@ client.on("interactionCreate", async (interaction) => {
             .setColor("#0099ff")
             .setThumbnail(interaction.guild.members.cache.get(selectedUserId)?.user.displayAvatarURL({ dynamic: true }));
 
-        await interaction.reply({
+        await interaction.editReply({
             embeds: [embed],
             components: [actionRow],
             flags: 64, // Ephemeral response
         });
+    }
+
+    // Handle pagination button clicks
+    if (customId === "prev_page" || customId === "next_page") {
+        const currentPage = parseInt(interaction.message.embeds[0].description.match(/Page (\d+)/)[1]);
+        const newPage = customId === "prev_page" ? currentPage - 1 : currentPage + 1;
+        await interaction.editReply(await showAdminProfiles(interaction, "", newPage));
     }
 
     // Handle search button click
@@ -229,7 +265,7 @@ client.on("interactionCreate", async (interaction) => {
         const userData = await fetchUserData();
         const user = userData[userId];
         if (!user) {
-            return interaction.reply({
+            return interaction.editReply({
                 content: "❌ No data found for this user.",
                 flags: 64, // Ephemeral response
             });
@@ -270,7 +306,7 @@ client.on("interactionCreate", async (interaction) => {
             .setColor("#0099ff")
             .setThumbnail(interaction.guild.members.cache.get(userId)?.user.displayAvatarURL({ dynamic: true }));
 
-        await interaction.reply({
+        await interaction.editReply({
             embeds: [embed],
             flags: 64, // Ephemeral response
         });
