@@ -5,6 +5,9 @@ const {
     ActionRowBuilder,
     ButtonBuilder,
     ButtonStyle,
+    ModalBuilder,
+    TextInputBuilder,
+    TextInputStyle,
 } = require("discord.js");
 const express = require("express");
 require("dotenv").config();
@@ -27,8 +30,8 @@ const client = new Client({
 const TEXT_CHANNEL_ID = "1324427183246282815"; // For tracking messages
 const DATABASE_CHANNEL_ID = "1335732990323593246"; // For storing data
 
-// 🔹 Set the Admin Role ID
-const Admin_ROLE_ID = "1108295271101759499"; // Replace with the actual role ID
+// 🔹 Set the admin Role ID
+const admin_ROLE_ID = "1108295271101759499"; // Replace with the actual role ID
 
 // Track users currently in voice channels
 const usersInVoice = {};
@@ -121,49 +124,53 @@ client.on("voiceStateUpdate", async (oldState, newState) => {
     }
 });
 
-// ✅ Create an embed with profile pictures of users with the Admin role
-async function showAdminProfiles(interaction, page = 1) {
+// ✅ Create an embed with profile pictures of users with the admin role
+async function showadminProfiles(interaction, query = "", page = 1) {
     const guild = interaction.guild;
 
-    // Fetch members with the Admin role using the role ID
-    const membersWithRole = guild.members.cache.filter((member) => member.roles.cache.has(Admin_ROLE_ID));
+    // Fetch members with the admin role using the role ID
+    const membersWithRole = guild.members.cache.filter((member) => member.roles.cache.has(admin_ROLE_ID));
     if (membersWithRole.size === 0) {
         return interaction.reply({
-            content: "❌ No members found with the Admin role.",
+            content: "❌ No members found with the admin role.",
             flags: 64, // Ephemeral response
         });
     }
 
-    const pageSize = 25; // Maximum of 25 Admins per page
-    const totalPages = Math.ceil(membersWithRole.size / pageSize);
+    // Filter members based on the query
+    const filteredMembers = Array.from(membersWithRole.values()).filter((member) => {
+        const displayName = member.nickname || member.user.username;
+        return displayName.toLowerCase().includes(query.toLowerCase());
+    });
+
+    if (filteredMembers.length === 0) {
+        return interaction.reply({
+            content: "❌ No matching admins found.",
+            flags: 64, // Ephemeral response
+        });
+    }
+
+    const pageSize = 25; // Maximum of 25 options per dropdown
+    const totalPages = Math.ceil(filteredMembers.length / pageSize);
 
     // Calculate the members to display on the current page
     const start = (page - 1) * pageSize;
     const end = start + pageSize;
-    const pageMembers = Array.from(membersWithRole.values()).slice(start, end);
+    const pageMembers = filteredMembers.slice(start, end);
 
-    // Create buttons for the current page's Admins
-    const buttons = [];
+    // Create a dropdown menu with the current page's members
+    const selectMenu = new StringSelectMenuBuilder()
+        .setCustomId("admin_select")
+        .setPlaceholder("Select an admin to view their stats");
+
     pageMembers.forEach((member) => {
         const userId = member.id;
-        const displayName = member.nickname || member.user.username; // Use nickname if available, otherwise username
-        const isOnline = member.presence?.status === "online";
-
-        // Add a button for each Admin
-        buttons.push(
-            new ButtonBuilder()
-                .setCustomId(`user_${userId}`)
-                .setLabel(displayName) // Use nickname or username
-                .setStyle(isOnline ? ButtonStyle.Success : ButtonStyle.Secondary)
-        );
+        const displayName = member.nickname || member.user.username;
+        selectMenu.addOptions({
+            label: displayName,
+            value: userId,
+        });
     });
-
-    // Split buttons into rows (max 5 buttons per row)
-    const actionRows = [];
-    for (let i = 0; i < buttons.length; i += 5) {
-        const row = new ActionRowBuilder().addComponents(buttons.slice(i, i + 5));
-        actionRows.push(row);
-    }
 
     // Add pagination buttons
     const prevButton = new ButtonBuilder()
@@ -180,42 +187,41 @@ async function showAdminProfiles(interaction, page = 1) {
 
     const paginationRow = new ActionRowBuilder().addComponents(prevButton, nextButton);
 
+    // Add a button for searching
+    const searchButton = new ButtonBuilder()
+        .setCustomId("search_admin")
+        .setLabel("🔍 Search admins")
+        .setStyle(ButtonStyle.Primary);
+
+    const actionRow = new ActionRowBuilder().addComponents(searchButton);
+
     // Create the embed
     const embed = new EmbedBuilder()
         .setTitle("👥 A7 Admin Checker | By @A7madShooter")
-        .setDescription(`Click on a user's name to view their voice activity stats.\n*Page ${page} of ${totalPages}*`)
+        .setDescription(`Select an admin from the dropdown to view their voice activity stats.\n*Page ${page} of ${totalPages}*`)
         .setColor("#0099ff");
 
     await interaction.reply({
         embeds: [embed],
-        components: [...actionRows, paginationRow],
+        components: [new ActionRowBuilder().addComponents(selectMenu), paginationRow, actionRow],
         flags: 64, // Ephemeral response
     });
 }
 
 // ✅ Handle interactions
 client.on("interactionCreate", async (interaction) => {
-    if (!interaction.isButton()) return;
+    if (!interaction.isStringSelectMenu() && !interaction.isButton() && !interaction.isModalSubmit()) return;
 
     const customId = interaction.customId;
 
     // Defer the reply to allow time for processing
     await interaction.deferReply({ flags: 64 });
 
-    // Handle pagination button clicks
-    if (customId === "prev_page" || customId === "next_page") {
-        const currentPage = parseInt(interaction.message.embeds[0].description.match(/Page (\d+)/)[1]);
-        const newPage = customId === "prev_page" ? currentPage - 1 : currentPage + 1;
-        await interaction.editReply(await showAdminProfiles(interaction, newPage));
-        return;
-    }
-
-    // Handle user profile button clicks
-    if (customId.startsWith("user_")) {
-        const userId = customId.split("_")[1];
+    // Handle admin selection from the dropdown
+    if (customId === "admin_select") {
+        const selectedUserId = interaction.values[0]; // Get the selected user ID
         const userData = await fetchUserData();
-        const user = userData[userId];
-
+        const user = userData[selectedUserId];
         if (!user) {
             return interaction.editReply({
                 content: "❌ No data found for this user.",
@@ -225,22 +231,19 @@ client.on("interactionCreate", async (interaction) => {
 
         // Create buttons for timeframes
         const dayButton = new ButtonBuilder()
-            .setCustomId(`day_${userId}`)
+            .setCustomId(`day_${selectedUserId}`)
             .setLabel("📅 Day")
             .setStyle(ButtonStyle.Primary);
-
         const weekButton = new ButtonBuilder()
-            .setCustomId(`week_${userId}`)
+            .setCustomId(`week_${selectedUserId}`)
             .setLabel("🗓️ Week")
             .setStyle(ButtonStyle.Primary);
-
         const monthButton = new ButtonBuilder()
-            .setCustomId(`month_${userId}`)
+            .setCustomId(`month_${selectedUserId}`)
             .setLabel("🗓️ Month")
             .setStyle(ButtonStyle.Primary);
-
         const allTimeButton = new ButtonBuilder()
-            .setCustomId(`alltime_${userId}`)
+            .setCustomId(`alltime_${selectedUserId}`)
             .setLabel("⏳ All Time")
             .setStyle(ButtonStyle.Primary);
 
@@ -250,7 +253,7 @@ client.on("interactionCreate", async (interaction) => {
             .setTitle(`📊 Select a Timeframe for ${user.username}`)
             .setDescription("Choose a timeframe to view voice activity stats.")
             .setColor("#0099ff")
-            .setThumbnail(interaction.guild.members.cache.get(userId)?.user.displayAvatarURL({ dynamic: true }));
+            .setThumbnail(interaction.guild.members.cache.get(selectedUserId)?.user.displayAvatarURL({ dynamic: true }));
 
         await interaction.editReply({
             embeds: [embed],
@@ -259,13 +262,43 @@ client.on("interactionCreate", async (interaction) => {
         });
     }
 
+    // Handle pagination button clicks
+    if (customId === "prev_page" || customId === "next_page") {
+        const currentPage = parseInt(interaction.message.embeds[0].description.match(/Page (\d+)/)[1]);
+        const newPage = customId === "prev_page" ? currentPage - 1 : currentPage + 1;
+        await interaction.editReply(await showadminProfiles(interaction, "", newPage));
+    }
+
+    // Handle search button click
+    if (customId === "search_admin") {
+        const modal = new ModalBuilder()
+            .setCustomId("search_modal")
+            .setTitle("Search admins");
+
+        const searchInput = new TextInputBuilder()
+            .setCustomId("search_query")
+            .setLabel("Enter a name or nickname to search:")
+            .setStyle(TextInputStyle.Short)
+            .setRequired(true);
+
+        const actionRow = new ActionRowBuilder().addComponents(searchInput);
+        modal.addComponents(actionRow);
+
+        await interaction.showModal(modal);
+    }
+
+    // Handle modal submission
+    if (interaction.isModalSubmit() && interaction.customId === "search_modal") {
+        const query = interaction.fields.getTextInputValue("search_query");
+        await showadminProfiles(interaction, query);
+    }
+
     // Handle timeframe button clicks
     if (customId.startsWith("day_") || customId.startsWith("week_") ||
         customId.startsWith("month_") || customId.startsWith("alltime_")) {
         const userId = customId.split("_")[1];
         const userData = await fetchUserData();
         const user = userData[userId];
-
         if (!user) {
             return interaction.editReply({
                 content: "❌ No data found for this user.",
@@ -332,7 +365,7 @@ function calculateMonthlyTime(history) {
 // ✅ Command to trigger the profile display
 client.on("messageCreate", async (message) => {
     if (message.content === "!admin") {
-        await showAdminProfiles(message);
+        await showadminProfiles(message);
     }
 });
 
