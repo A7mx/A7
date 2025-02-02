@@ -17,11 +17,11 @@ const client = new Client({
 });
 
 // 🔹 Set your Discord text channel IDs
-const TEXT_CHANNEL_ID = "1328094647938973768"; // For tracking messages
-const DATABASE_CHANNEL_ID = "1334150400143523872"; // For storing data
+const TEXT_CHANNEL_ID = "1335732990323593246"; // For tracking messages
+const DATABASE_CHANNEL_ID = "1335732990323593246"; // For storing data
 
 // 🔹 Set the Owner Role ID
-const OWNER_ROLE_ID = "602973779202670607"; // Replace with the actual role ID
+const OWNER_ROLE_ID = "1108295271101759499"; // Replace with the actual role ID
 
 // Track users currently in voice channels
 const usersInVoice = {};
