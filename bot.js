@@ -122,28 +122,29 @@ client.on("voiceStateUpdate", async (oldState, newState) => {
 });
 
 // ✅ Create an embed with profile pictures of users with the Owner role
-async function showOwnerProfiles(message) {
-    const guild = message.guild;
+async function showOwnerProfiles(interaction, page = 1) {
+    const guild = interaction.guild;
 
     // Fetch members with the Owner role using the role ID
     const membersWithRole = guild.members.cache.filter((member) => member.roles.cache.has(OWNER_ROLE_ID));
     if (membersWithRole.size === 0) {
-        return message.reply({
+        return interaction.reply({
             content: "❌ No members found with the Owner role.",
             flags: 64, // Ephemeral response
         });
     }
 
-    const userData = await fetchUserData();
+    const pageSize = 25; // Maximum of 25 buttons per page
+    const totalPages = Math.ceil(membersWithRole.size / pageSize);
 
-    // Create an embed with profile pictures and buttons
-    const embed = new EmbedBuilder()
-        .setTitle("👥 A7 Admin Checker | By @A7madShooter")
-        .setDescription("Click on a user's name to view their voice activity stats.")
-        .setColor("#0099ff");
+    // Calculate the members to display on the current page
+    const start = (page - 1) * pageSize;
+    const end = start + pageSize;
+    const pageMembers = Array.from(membersWithRole.values()).slice(start, end);
 
+    // Create buttons for the current page's owners
     const buttons = [];
-    membersWithRole.forEach((member) => {
+    pageMembers.forEach((member) => {
         const userId = member.id;
         const displayName = member.nickname || member.user.username; // Use nickname if available, otherwise username
         const isOnline = member.presence?.status === "online";
@@ -164,17 +165,48 @@ async function showOwnerProfiles(message) {
         actionRows.push(row);
     }
 
-    await message.reply({
+    // Add pagination buttons
+    const prevButton = new ButtonBuilder()
+        .setCustomId("prev_page")
+        .setLabel("⬅️ Previous")
+        .setStyle(ButtonStyle.Primary)
+        .setDisabled(page === 1);
+
+    const nextButton = new ButtonBuilder()
+        .setCustomId("next_page")
+        .setLabel("➡️ Next")
+        .setStyle(ButtonStyle.Primary)
+        .setDisabled(page === totalPages);
+
+    const paginationRow = new ActionRowBuilder().addComponents(prevButton, nextButton);
+
+    // Create the embed
+    const embed = new EmbedBuilder()
+        .setTitle("👥 A7 Admin Checker | By @A7madShooter")
+        .setDescription(`Click on a user's name to view their voice activity stats.\n*Page ${page} of ${totalPages}*`)
+        .setColor("#0099ff");
+
+    await interaction.reply({
         embeds: [embed],
-        components: actionRows,
+        components: [...actionRows, paginationRow],
+        flags: 64, // Ephemeral response
     });
 }
 
-// ✅ Handle button clicks to show user stats
+// ✅ Handle interactions
 client.on("interactionCreate", async (interaction) => {
     if (!interaction.isButton()) return;
 
     const customId = interaction.customId;
+
+    // Handle pagination button clicks
+    if (customId === "prev_page" || customId === "next_page") {
+        const currentPage = parseInt(interaction.message.embeds[0].description.match(/Page (\d+)/)[1]);
+        const newPage = customId === "prev_page" ? currentPage - 1 : currentPage + 1;
+        await interaction.deferUpdate(); // Defer the reply to avoid errors
+        await showOwnerProfiles(interaction, newPage);
+        return;
+    }
 
     // Handle user profile button clicks
     if (customId.startsWith("user_")) {
@@ -189,7 +221,7 @@ client.on("interactionCreate", async (interaction) => {
             });
         }
 
-        // Create three new buttons for Day, Week, Month, and All Time
+        // Create buttons for timeframes
         const dayButton = new ButtonBuilder()
             .setCustomId(`day_${userId}`)
             .setLabel("📅 Day")
