@@ -126,7 +126,7 @@ client.on("voiceStateUpdate", async (oldState, newState) => {
 });
 
 // ✅ Create an embed with profile pictures of users with the Admin role
-async function showAdminProfiles(interaction) {
+async function showOwnerProfiles(interaction) {
     const guild = interaction.guild;
 
     // Fetch members with the Admin role using the role ID
@@ -138,25 +138,49 @@ async function showAdminProfiles(interaction) {
         });
     }
 
-    // Add a search button
-    const searchButton = new ButtonBuilder()
-        .setCustomId("search_admin")
-        .setLabel("🔍 Search Admin")
-        .setStyle(ButtonStyle.Primary);
+    const userData = await fetchUserData();
 
-    const actionRow = new ActionRowBuilder().addComponents(searchButton);
-
-    // Create the embed
+    // Create an embed with profile pictures and buttons
     const embed = new EmbedBuilder()
         .setTitle("👥 A7 Admin Checker | By @A7madShooter")
-        .setDescription("Click the button below to search for an admin.")
+        .setDescription("Click on a user's name to view their voice activity stats.")
         .setColor("#0099ff");
 
-    await interaction.reply({
-        embeds: [embed],
-        components: [actionRow],
-        flags: 64, // Ephemeral response
+    const buttons = [];
+    membersWithRole.forEach((member) => {
+        const userId = member.id;
+        const displayName = member.nickname || member.user.username; // Use nickname if available, otherwise username
+        const isOnline = member.presence?.status === "online";
+
+        // Add a button for each admin
+        buttons.push(
+            new ButtonBuilder()
+                .setCustomId(`user_${userId}`)
+                .setLabel(displayName.substring(0, 80)) // Ensure label doesn't exceed 80 characters
+                .setStyle(isOnline ? ButtonStyle.Success : ButtonStyle.Secondary)
+        );
     });
+
+    // Split buttons into chunks of 25 (5 rows × 5 buttons)
+    const buttonChunks = [];
+    for (let i = 0; i < buttons.length; i += 25) {
+        buttonChunks.push(buttons.slice(i, i + 25));
+    }
+
+    // Send each chunk as a separate message
+    for (const chunk of buttonChunks) {
+        // Split buttons into rows (max 5 buttons per row)
+        const actionRows = [];
+        for (let j = 0; j < chunk.length; j += 5) {
+            const row = new ActionRowBuilder().addComponents(chunk.slice(j, j + 5));
+            actionRows.push(row);
+        }
+
+        await interaction.channel.send({
+            embeds: [embed],
+            components: actionRows,
+        });
+    }
 }
 
 // ✅ Handle interactions
@@ -178,29 +202,35 @@ client.on("interactionCreate", async (interaction) => {
             });
         }
 
-        // Create a dropdown menu with admin names
-        const selectMenu = new StringSelectMenuBuilder()
-            .setCustomId("admin_select_menu")
-            .setPlaceholder("Select an admin...")
-            .setMaxValues(1);
+        // Split members into chunks of 25 (max options per dropdown menu)
+        const memberChunks = [];
+        const membersArray = Array.from(membersWithRole.values());
+        for (let i = 0; i < membersArray.length; i += 25) {
+            memberChunks.push(membersArray.slice(i, i + 25));
+        }
 
-        membersWithRole.forEach((member) => {
-            const displayName = member.nickname || member.user.username;
-            selectMenu.addOptions(
-                {
-                    label: displayName,
+        // Send each chunk as a separate dropdown menu
+        for (const chunk of memberChunks) {
+            const selectMenu = new StringSelectMenuBuilder()
+                .setCustomId("admin_select_menu")
+                .setPlaceholder("Select an admin...")
+                .setMaxValues(1);
+
+            chunk.forEach((member) => {
+                const displayName = member.nickname || member.user.username;
+                selectMenu.addOptions({
+                    label: displayName.substring(0, 100), // Ensure label doesn't exceed 100 characters
                     value: member.id,
-                }
-            );
-        });
+                });
+            });
 
-        const actionRow = new ActionRowBuilder().addComponents(selectMenu);
+            const actionRow = new ActionRowBuilder().addComponents(selectMenu);
 
-        await interaction.reply({
-            content: "Please select an admin from the dropdown list:",
-            components: [actionRow],
-            flags: 64, // Ephemeral response
-        });
+            await interaction.channel.send({
+                content: "Please select an admin from the dropdown list:",
+                components: [actionRow],
+            });
+        }
     }
 
     // Handle dropdown selection
@@ -325,7 +355,7 @@ function calculateMonthlyTime(history) {
 // ✅ Command to trigger the profile display
 client.on("messageCreate", async (message) => {
     if (message.content === "!admin") {
-        await showAdminProfiles(message);
+        await showOwnerProfiles(message);
     }
 });
 
