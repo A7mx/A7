@@ -5,13 +5,6 @@ const {
     ActionRowBuilder,
     ButtonBuilder,
     ButtonStyle,
-    ModalBuilder,
-    TextInputBuilder,
-    TextInputStyle,
-    StringSelectMenuBuilder,
-    StringSelectMenuOptionBuilder,
-    SlashCommandBuilder,
-    AutocompleteInteraction,
 } = require("discord.js");
 const express = require("express");
 require("dotenv").config();
@@ -34,8 +27,8 @@ const client = new Client({
 const TEXT_CHANNEL_ID = "1324427183246282815"; // For tracking messages
 const DATABASE_CHANNEL_ID = "1335732990323593246"; // For storing data
 
-// 🔹 Set the Owner Role ID
-const OWNER_ROLE_ID = "1108295271101759499"; // Replace with the actual role ID
+// 🔹 Set the admin Role ID
+const admin_ROLE_ID = "1108295271101759499"; // Replace with the actual role ID
 
 // Track users currently in voice channels
 const usersInVoice = {};
@@ -45,18 +38,19 @@ async function fetchUserData() {
     try {
         const channel = await client.channels.fetch(DATABASE_CHANNEL_ID);
         if (!channel) return console.error("⚠️ Database channel not found!");
-        const messages = await channel.messages.fetch({ limit: 1 });
-        if (messages.size === 0) {
-            // No messages in the database channel, create a new one
-            const sentMessage = await channel.send("```json\n{}\n```");
-            return {};
-        }
-        const latestMessage = messages.first();
-        const content = latestMessage.content.trim();
-        if (content.startsWith("```json") && content.endsWith("```")) {
-            const jsonContent = content.slice(7, -3).trim();
-            return JSON.parse(jsonContent);
-        }
+
+        // Fetch all messages in the database channel
+        const messages = await channel.messages.fetch({ limit: 100 });
+
+        // Combine all chunks into a single JSON string
+        let jsonContent = "";
+        messages.forEach((message) => {
+            if (message.content.startsWith("```json") && message.content.endsWith("```")) {
+                jsonContent += message.content.slice(7, -3).trim();
+            }
+        });
+
+        return JSON.parse(jsonContent || "{}");
     } catch (error) {
         console.error("⚠️ Error fetching user data:", error);
     }
@@ -68,15 +62,30 @@ async function saveUserData(userData) {
     try {
         const channel = await client.channels.fetch(DATABASE_CHANNEL_ID);
         if (!channel) return console.error("⚠️ Database channel not found!");
-        const messages = await channel.messages.fetch({ limit: 1 });
-        const jsonContent = "```json\n" + JSON.stringify(userData, null, 2) + "\n```";
-        if (messages.size === 0) {
-            // No messages in the database channel, create a new one
-            await channel.send(jsonContent);
-        } else {
-            const latestMessage = messages.first();
-            await latestMessage.edit(jsonContent);
+
+        // Convert the user data to a JSON string
+        const jsonContent = JSON.stringify(userData, null, 2);
+
+        // Split the JSON content into chunks of 1900 characters (to leave room for formatting)
+        const chunkSize = 1900;
+        const chunks = [];
+        for (let i = 0; i < jsonContent.length; i += chunkSize) {
+            chunks.push(jsonContent.slice(i, i + chunkSize));
         }
+
+        // Fetch existing messages in the database channel
+        const messages = await channel.messages.fetch({ limit: 100 });
+
+        // Delete old messages if they exist
+        if (messages.size > 0) {
+            await Promise.all(messages.map((msg) => msg.delete()));
+        }
+
+        // Send each chunk as a separate message
+        for (const chunk of chunks) {
+            await channel.send(`\`\`\`json\n${chunk}\n\`\`\``);
+        }
+
         console.log("✅ Saved user data to the database channel.");
     } catch (error) {
         console.error("⚠️ Error saving user data:", error);
@@ -97,6 +106,10 @@ client.on("voiceStateUpdate", async (oldState, newState) => {
     const userId = newState.member?.id || oldState.member?.id;
     const username = newState.member?.user?.username || oldState.member?.user?.username;
     if (!userId || !username) return;
+
+    // Check if the user has the admin role
+    const member = newState.member || oldState.member;
+    if (!member.roles.cache.has(admin_ROLE_ID)) return;
 
     let userData = await fetchUserData();
 
@@ -127,86 +140,64 @@ client.on("voiceStateUpdate", async (oldState, newState) => {
     }
 });
 
-// ✅ Create an embed with profile pictures of users with the Owner role
-async function showOwnerProfiles(interaction) {
+// ✅ Create an embed with profile pictures of users with the admin role
+async function showadminProfiles(interaction) {
     const guild = interaction.guild;
 
-    // Fetch members with the Owner role using the role ID
-    const membersWithRole = guild.members.cache.filter((member) => member.roles.cache.has(OWNER_ROLE_ID));
+    // Fetch members with the admin role using the role ID
+    const membersWithRole = guild.members.cache.filter((member) => member.roles.cache.has(admin_ROLE_ID));
     if (membersWithRole.size === 0) {
         return interaction.reply({
-            content: "❌ No members found with the Owner role.",
+            content: "❌ No members found with the admin role.",
             flags: 64, // Ephemeral response
         });
     }
 
-    // Add a search button
-    const searchButton = new ButtonBuilder()
-        .setCustomId("search_admin")
-        .setLabel("🔍 Search Admin")
-        .setStyle(ButtonStyle.Primary);
+    const userData = await fetchUserData();
 
-    const actionRow = new ActionRowBuilder().addComponents(searchButton);
-
-    // Create the embed
+    // Create an embed with profile pictures and buttons
     const embed = new EmbedBuilder()
         .setTitle("👥 A7 Admin Checker | By @A7madShooter")
-        .setDescription("Click the button below to search for an admin.")
+        .setDescription("Click on a user's name to view their voice activity stats.")
         .setColor("#0099ff");
+
+    const buttons = [];
+    membersWithRole.forEach((member) => {
+        const userId = member.id;
+        const displayName = member.nickname || member.user.username; // Use nickname if available, otherwise username
+        const isOnline = member.presence?.status === "online";
+
+        // Add a button for each admin
+        buttons.push(
+            new ButtonBuilder()
+                .setCustomId(`user_${userId}`)
+                .setLabel(displayName) // Use nickname or username
+                .setStyle(isOnline ? ButtonStyle.Success : ButtonStyle.Secondary)
+        );
+    });
+
+    // Split buttons into rows (max 5 buttons per row)
+    const actionRows = [];
+    for (let i = 0; i < buttons.length; i += 5) {
+        const row = new ActionRowBuilder().addComponents(buttons.slice(i, i + 5));
+        actionRows.push(row);
+    }
 
     await interaction.reply({
         embeds: [embed],
-        components: [actionRow],
-        flags: 64, // Ephemeral response
+        components: actionRows,
     });
 }
 
-// ✅ Handle interactions
+// ✅ Handle button clicks to show user stats
 client.on("interactionCreate", async (interaction) => {
-    if (!interaction.isButton() && !interaction.isModalSubmit() && !interaction.isStringSelectMenu()) return;
+    if (!interaction.isButton()) return;
 
     const customId = interaction.customId;
 
-    // Handle search button click
-    if (customId === "search_admin") {
-        const guild = interaction.guild;
-
-        // Fetch members with the Owner role
-        const membersWithRole = guild.members.cache.filter((member) => member.roles.cache.has(OWNER_ROLE_ID));
-        if (membersWithRole.size === 0) {
-            return interaction.reply({
-                content: "❌ No members found with the Owner role.",
-                flags: 64, // Ephemeral response
-            });
-        }
-
-        // Create a dropdown menu with admin names
-        const selectMenu = new StringSelectMenuBuilder()
-            .setCustomId("admin_select_menu")
-            .setPlaceholder("Select an admin...")
-            .setMaxValues(1);
-
-        membersWithRole.forEach((member) => {
-            const displayName = member.nickname || member.user.username;
-            selectMenu.addOptions(
-                new StringSelectMenuOptionBuilder()
-                    .setLabel(displayName)
-                    .setValue(member.id)
-            );
-        });
-
-        const actionRow = new ActionRowBuilder().addComponents(selectMenu);
-
-        await interaction.reply({
-            content: "Please select an admin from the dropdown list:",
-            components: [actionRow],
-            flags: 64, // Ephemeral response
-        });
-    }
-
-    // Handle dropdown selection
-    if (interaction.isStringSelectMenu() && interaction.customId === "admin_select_menu") {
-        const userId = interaction.values[0];
+    // Handle user profile button clicks
+    if (customId.startsWith("user_")) {
+        const userId = customId.split("_")[1];
         const userData = await fetchUserData();
         const user = userData[userId];
 
@@ -217,7 +208,7 @@ client.on("interactionCreate", async (interaction) => {
             });
         }
 
-        // Create buttons for timeframes
+        // Create three new buttons for Day, Week, Month, and All Time
         const dayButton = new ButtonBuilder()
             .setCustomId(`day_${userId}`)
             .setLabel("📅 Day")
@@ -326,7 +317,7 @@ function calculateMonthlyTime(history) {
 // ✅ Command to trigger the profile display
 client.on("messageCreate", async (message) => {
     if (message.content === "!admin") {
-        await showOwnerProfiles(message);
+        await showadminProfiles(message);
     }
 });
 
