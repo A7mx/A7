@@ -1,11 +1,4 @@
-const {
-    Client,
-    GatewayIntentBits,
-    EmbedBuilder,
-    ActionRowBuilder,
-    ButtonBuilder,
-    ButtonStyle,
-} = require("discord.js");
+const { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require("discord.js");
 const express = require("express");
 require("dotenv").config();
 const app = express();
@@ -103,7 +96,8 @@ client.on("voiceStateUpdate", async (oldState, newState) => {
     if ((!newState.channel && oldState.channel) && usersInVoice[userId]) {
         const timeSpent = (Date.now() - usersInVoice[userId]) / 1000;
         delete usersInVoice[userId];
-        if (timeSpent > 10) { // Ignore if user left instantly
+        if (timeSpent > 10) {
+            // Ignore if user left instantly
             if (!userData[userId]) {
                 userData[userId] = {
                     username,
@@ -114,10 +108,7 @@ client.on("voiceStateUpdate", async (oldState, newState) => {
             const today = new Date().toISOString().split("T")[0];
             userData[userId].total_time += timeSpent;
             userData[userId].history[today] = (userData[userId].history[today] || 0) + timeSpent;
-
-            // Save the updated user data to the database
             await saveUserData(userData);
-
             console.log(`🚪 ${username} left voice channel. Time added: ${Math.floor(timeSpent / 60)} min`);
         }
     }
