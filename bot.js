@@ -8,6 +8,10 @@ const {
     ModalBuilder,
     TextInputBuilder,
     TextInputStyle,
+    StringSelectMenuBuilder,
+    StringSelectMenuOptionBuilder,
+    SlashCommandBuilder,
+    AutocompleteInteraction,
 } = require("discord.js");
 const express = require("express");
 require("dotenv").config();
@@ -37,24 +41,22 @@ const OWNER_ROLE_ID = "1108295271101759499"; // Replace with the actual role ID
 const usersInVoice = {};
 
 // ✅ Fetch or initialize user data from the database channel
-// ✅ Fetch or initialize user data from the database channel
 async function fetchUserData() {
     try {
         const channel = await client.channels.fetch(DATABASE_CHANNEL_ID);
         if (!channel) return console.error("⚠️ Database channel not found!");
-
-        // Fetch all messages in the database channel
-        const messages = await channel.messages.fetch({ limit: 100 });
-
-        // Combine all chunks into a single JSON string
-        let jsonContent = "";
-        messages.forEach((message) => {
-            if (message.content.startsWith("```json") && message.content.endsWith("```")) {
-                jsonContent += message.content.slice(7, -3).trim();
-            }
-        });
-
-        return JSON.parse(jsonContent || "{}");
+        const messages = await channel.messages.fetch({ limit: 1 });
+        if (messages.size === 0) {
+            // No messages in the database channel, create a new one
+            const sentMessage = await channel.send("```json\n{}\n```");
+            return {};
+        }
+        const latestMessage = messages.first();
+        const content = latestMessage.content.trim();
+        if (content.startsWith("```json") && content.endsWith("```")) {
+            const jsonContent = content.slice(7, -3).trim();
+            return JSON.parse(jsonContent);
+        }
     } catch (error) {
         console.error("⚠️ Error fetching user data:", error);
     }
@@ -66,30 +68,15 @@ async function saveUserData(userData) {
     try {
         const channel = await client.channels.fetch(DATABASE_CHANNEL_ID);
         if (!channel) return console.error("⚠️ Database channel not found!");
-
-        // Convert the user data to a JSON string
-        const jsonContent = JSON.stringify(userData, null, 2);
-
-        // Split the JSON content into chunks of 1900 characters (to leave room for formatting)
-        const chunkSize = 1900;
-        const chunks = [];
-        for (let i = 0; i < jsonContent.length; i += chunkSize) {
-            chunks.push(jsonContent.slice(i, i + chunkSize));
+        const messages = await channel.messages.fetch({ limit: 1 });
+        const jsonContent = "```json\n" + JSON.stringify(userData, null, 2) + "\n```";
+        if (messages.size === 0) {
+            // No messages in the database channel, create a new one
+            await channel.send(jsonContent);
+        } else {
+            const latestMessage = messages.first();
+            await latestMessage.edit(jsonContent);
         }
-
-        // Fetch existing messages in the database channel
-        const messages = await channel.messages.fetch({ limit: 100 });
-
-        // Delete old messages if they exist
-        if (messages.size > 0) {
-            await Promise.all(messages.map((msg) => msg.delete()));
-        }
-
-        // Send each chunk as a separate message
-        for (const chunk of chunks) {
-            await channel.send(`\`\`\`json\n${chunk}\n\`\`\``);
-        }
-
         console.log("✅ Saved user data to the database channel.");
     } catch (error) {
         console.error("⚠️ Error saving user data:", error);
@@ -176,85 +163,50 @@ async function showOwnerProfiles(interaction) {
 
 // ✅ Handle interactions
 client.on("interactionCreate", async (interaction) => {
-    if (!interaction.isButton() && !interaction.isModalSubmit()) return;
+    if (!interaction.isButton() && !interaction.isModalSubmit() && !interaction.isStringSelectMenu()) return;
 
     const customId = interaction.customId;
 
     // Handle search button click
     if (customId === "search_admin") {
-        const modal = new ModalBuilder()
-            .setCustomId("search_modal")
-            .setTitle("Search Admin");
-
-        const searchInput = new TextInputBuilder()
-            .setCustomId("search_query")
-            .setLabel("Enter a name or nickname to search:")
-            .setStyle(TextInputStyle.Short)
-            .setRequired(true);
-
-        const actionRow = new ActionRowBuilder().addComponents(searchInput);
-        modal.addComponents(actionRow);
-
-        await interaction.showModal(modal);
-    }
-
-    // Handle modal submission
-    if (interaction.isModalSubmit() && interaction.customId === "search_modal") {
-        const query = interaction.fields.getTextInputValue("search_query");
         const guild = interaction.guild;
 
         // Fetch members with the Owner role
         const membersWithRole = guild.members.cache.filter((member) => member.roles.cache.has(OWNER_ROLE_ID));
-        const filteredMembers = Array.from(membersWithRole.values()).filter((member) => {
-            const displayName = member.nickname || member.user.username;
-            return displayName.toLowerCase().includes(query.toLowerCase());
-        });
-
-        if (filteredMembers.length === 0) {
+        if (membersWithRole.size === 0) {
             return interaction.reply({
-                content: "❌ No matching admins found.",
+                content: "❌ No members found with the Owner role.",
                 flags: 64, // Ephemeral response
             });
         }
 
-        // Create buttons for the filtered members
-        const buttons = [];
-        filteredMembers.forEach((member) => {
-            const userId = member.id;
-            const displayName = member.nickname || member.user.username; // Use nickname if available, otherwise username
-            const isOnline = member.presence?.status === "online";
+        // Create a dropdown menu with admin names
+        const selectMenu = new StringSelectMenuBuilder()
+            .setCustomId("admin_select_menu")
+            .setPlaceholder("Select an admin...")
+            .setMaxValues(1);
 
-            // Add a button for each matching admin
-            buttons.push(
-                new ButtonBuilder()
-                    .setCustomId(`user_${userId}`)
-                    .setLabel(displayName) // Use nickname or username
-                    .setStyle(isOnline ? ButtonStyle.Success : ButtonStyle.Secondary)
+        membersWithRole.forEach((member) => {
+            const displayName = member.nickname || member.user.username;
+            selectMenu.addOptions(
+                new StringSelectMenuOptionBuilder()
+                    .setLabel(displayName)
+                    .setValue(member.id)
             );
         });
 
-        // Split buttons into rows (max 5 buttons per row)
-        const actionRows = [];
-        for (let i = 0; i < buttons.length; i += 5) {
-            const row = new ActionRowBuilder().addComponents(buttons.slice(i, i + 5));
-            actionRows.push(row);
-        }
-
-        const embed = new EmbedBuilder()
-            .setTitle("🔍 Search Results")
-            .setDescription(`Found ${filteredMembers.length} matching admins:`)
-            .setColor("#0099ff");
+        const actionRow = new ActionRowBuilder().addComponents(selectMenu);
 
         await interaction.reply({
-            embeds: [embed],
-            components: actionRows,
+            content: "Please select an admin from the dropdown list:",
+            components: [actionRow],
             flags: 64, // Ephemeral response
         });
     }
 
-    // Handle user profile button clicks
-    if (customId.startsWith("user_")) {
-        const userId = customId.split("_")[1];
+    // Handle dropdown selection
+    if (interaction.isStringSelectMenu() && interaction.customId === "admin_select_menu") {
+        const userId = interaction.values[0];
         const userData = await fetchUserData();
         const user = userData[userId];
 
@@ -372,17 +324,7 @@ function calculateMonthlyTime(history) {
 }
 
 // ✅ Command to trigger the profile display
-// ✅ Command to trigger the profile display
 client.on("messageCreate", async (message) => {
-    // Ensure the bot doesn't respond to itself or other bots
-    if (message.author.bot) return;
-
-    // Restrict the command to a specific channel
-    if (message.channel.id !== TEXT_CHANNEL_ID) {
-        return; // Ignore commands from other channels
-    }
-
-    // Handle the !admin command
     if (message.content === "!admin") {
         await showOwnerProfiles(message);
     }
