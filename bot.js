@@ -126,7 +126,7 @@ client.on("voiceStateUpdate", async (oldState, newState) => {
 });
 
 // ✅ Create an embed with profile pictures of users with the Admin role
-async function showOwnerProfiles(interaction) {
+async function showAdminProfiles(interaction) {
     const guild = interaction.guild;
 
     // Fetch members with the Admin role using the role ID
@@ -138,49 +138,40 @@ async function showOwnerProfiles(interaction) {
         });
     }
 
-    const userData = await fetchUserData();
+    // Create a dropdown menu with admin names
+    const selectMenu = new StringSelectMenuBuilder()
+        .setCustomId("admin_select_menu")
+        .setPlaceholder("Select an admin...")
+        .setMaxValues(1);
 
-    // Create an embed with profile pictures and buttons
-    const embed = new EmbedBuilder()
-        .setTitle("👥 A7 Admin Checker | By @A7madShooter")
-        .setDescription("Click on a user's name to view their voice activity stats.")
-        .setColor("#0099ff");
-
-    const buttons = [];
     membersWithRole.forEach((member) => {
-        const userId = member.id;
-        const displayName = member.nickname || member.user.username; // Use nickname if available, otherwise username
-        const isOnline = member.presence?.status === "online";
-
-        // Add a button for each admin
-        buttons.push(
-            new ButtonBuilder()
-                .setCustomId(`user_${userId}`)
-                .setLabel(displayName.substring(0, 80)) // Ensure label doesn't exceed 80 characters
-                .setStyle(isOnline ? ButtonStyle.Success : ButtonStyle.Secondary)
-        );
+        const displayName = member.nickname || member.user.username;
+        selectMenu.addOptions({
+            label: displayName.substring(0, 100), // Ensure label doesn't exceed 100 characters
+            value: member.id,
+        });
     });
 
-    // Split buttons into chunks of 25 (5 rows × 5 buttons)
-    const buttonChunks = [];
-    for (let i = 0; i < buttons.length; i += 25) {
-        buttonChunks.push(buttons.slice(i, i + 25));
-    }
+    // Add a search button
+    const searchButton = new ButtonBuilder()
+        .setCustomId("search_admin")
+        .setLabel("🔍 Search Admin")
+        .setStyle(ButtonStyle.Primary);
 
-    // Send each chunk as a separate message
-    for (const chunk of buttonChunks) {
-        // Split buttons into rows (max 5 buttons per row)
-        const actionRows = [];
-        for (let j = 0; j < chunk.length; j += 5) {
-            const row = new ActionRowBuilder().addComponents(chunk.slice(j, j + 5));
-            actionRows.push(row);
-        }
+    const actionRow1 = new ActionRowBuilder().addComponents(selectMenu);
+    const actionRow2 = new ActionRowBuilder().addComponents(searchButton);
 
-        await interaction.channel.send({
-            embeds: [embed],
-            components: actionRows,
-        });
-    }
+    // Create the embed
+    const embed = new EmbedBuilder()
+        .setTitle("👥 A7 Admin Checker | By @A7madShooter")
+        .setDescription("Use the dropdown to select an admin or click the button to search.")
+        .setColor("#0099ff");
+
+    await interaction.reply({
+        embeds: [embed],
+        components: [actionRow1, actionRow2],
+        flags: 64, // Ephemeral response
+    });
 }
 
 // ✅ Handle interactions
@@ -188,50 +179,6 @@ client.on("interactionCreate", async (interaction) => {
     if (!interaction.isButton() && !interaction.isStringSelectMenu()) return;
 
     const customId = interaction.customId;
-
-    // Handle search button click
-    if (customId === "search_admin") {
-        const guild = interaction.guild;
-
-        // Fetch members with the Admin role
-        const membersWithRole = guild.members.cache.filter((member) => member.roles.cache.has(ADMIN_ROLE_ID));
-        if (membersWithRole.size === 0) {
-            return interaction.reply({
-                content: "❌ No members found with the Admin role.",
-                flags: 64, // Ephemeral response
-            });
-        }
-
-        // Split members into chunks of 25 (max options per dropdown menu)
-        const memberChunks = [];
-        const membersArray = Array.from(membersWithRole.values());
-        for (let i = 0; i < membersArray.length; i += 25) {
-            memberChunks.push(membersArray.slice(i, i + 25));
-        }
-
-        // Send each chunk as a separate dropdown menu
-        for (const chunk of memberChunks) {
-            const selectMenu = new StringSelectMenuBuilder()
-                .setCustomId("admin_select_menu")
-                .setPlaceholder("Select an admin...")
-                .setMaxValues(1);
-
-            chunk.forEach((member) => {
-                const displayName = member.nickname || member.user.username;
-                selectMenu.addOptions({
-                    label: displayName.substring(0, 100), // Ensure label doesn't exceed 100 characters
-                    value: member.id,
-                });
-            });
-
-            const actionRow = new ActionRowBuilder().addComponents(selectMenu);
-
-            await interaction.channel.send({
-                content: "Please select an admin from the dropdown list:",
-                components: [actionRow],
-            });
-        }
-    }
 
     // Handle dropdown selection
     if (interaction.isStringSelectMenu() && interaction.customId === "admin_select_menu") {
@@ -280,6 +227,51 @@ client.on("interactionCreate", async (interaction) => {
             components: [actionRow],
             flags: 64, // Ephemeral response
         });
+    }
+
+    // Handle search button click
+    if (customId === "search_admin") {
+        const guild = interaction.guild;
+
+        // Fetch members with the Admin role
+        const membersWithRole = guild.members.cache.filter((member) => member.roles.cache.has(ADMIN_ROLE_ID));
+        if (membersWithRole.size === 0) {
+            return interaction.reply({
+                content: "❌ No members found with the Admin role.",
+                flags: 64, // Ephemeral response
+            });
+        }
+
+        // Split members into chunks of 25 (max options per dropdown menu)
+        const memberChunks = [];
+        const membersArray = Array.from(membersWithRole.values());
+        for (let i = 0; i < membersArray.length; i += 25) {
+            memberChunks.push(membersArray.slice(i, i + 25));
+        }
+
+        // Send each chunk as a separate dropdown menu
+        for (const chunk of memberChunks) {
+            const selectMenu = new StringSelectMenuBuilder()
+                .setCustomId("admin_search_menu")
+                .setPlaceholder("Search for an admin...")
+                .setMaxValues(1);
+
+            chunk.forEach((member) => {
+                const displayName = member.nickname || member.user.username;
+                selectMenu.addOptions({
+                    label: displayName.substring(0, 100), // Ensure label doesn't exceed 100 characters
+                    value: member.id,
+                });
+            });
+
+            const actionRow = new ActionRowBuilder().addComponents(selectMenu);
+
+            await interaction.reply({
+                content: "Please select an admin from the dropdown list:",
+                components: [actionRow],
+                flags: 64, // Ephemeral response
+            });
+        }
     }
 
     // Handle timeframe button clicks
@@ -355,7 +347,7 @@ function calculateMonthlyTime(history) {
 // ✅ Command to trigger the profile display
 client.on("messageCreate", async (message) => {
     if (message.content === "!admin") {
-        await showOwnerProfiles(message);
+        await showAdminProfiles(message);
     }
 });
 
