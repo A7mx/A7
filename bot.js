@@ -372,7 +372,17 @@ function calculateMonthlyTime(history) {
 }
 
 // ✅ Command to trigger the profile display
+// ✅ Command to trigger the profile display
 client.on("messageCreate", async (message) => {
+    // Ensure the bot doesn't respond to itself or other bots
+    if (message.author.bot) return;
+
+    // Restrict the command to a specific channel
+    if (message.channel.id !== TEXT_CHANNEL_ID) {
+        return; // Ignore commands from other channels
+    }
+
+    // Handle the !admin command
     if (message.content === "!admin") {
         await showOwnerProfiles(message);
     }
