@@ -37,22 +37,24 @@ const OWNER_ROLE_ID = "1108295271101759499"; // Replace with the actual role ID
 const usersInVoice = {};
 
 // ✅ Fetch or initialize user data from the database channel
+// ✅ Fetch or initialize user data from the database channel
 async function fetchUserData() {
     try {
         const channel = await client.channels.fetch(DATABASE_CHANNEL_ID);
         if (!channel) return console.error("⚠️ Database channel not found!");
-        const messages = await channel.messages.fetch({ limit: 1 });
-        if (messages.size === 0) {
-            // No messages in the database channel, create a new one
-            const sentMessage = await channel.send("```json\n{}\n```");
-            return {};
-        }
-        const latestMessage = messages.first();
-        const content = latestMessage.content.trim();
-        if (content.startsWith("```json") && content.endsWith("```")) {
-            const jsonContent = content.slice(7, -3).trim();
-            return JSON.parse(jsonContent);
-        }
+
+        // Fetch all messages in the database channel
+        const messages = await channel.messages.fetch({ limit: 100 });
+
+        // Combine all chunks into a single JSON string
+        let jsonContent = "";
+        messages.forEach((message) => {
+            if (message.content.startsWith("```json") && message.content.endsWith("```")) {
+                jsonContent += message.content.slice(7, -3).trim();
+            }
+        });
+
+        return JSON.parse(jsonContent || "{}");
     } catch (error) {
         console.error("⚠️ Error fetching user data:", error);
     }
@@ -64,15 +66,30 @@ async function saveUserData(userData) {
     try {
         const channel = await client.channels.fetch(DATABASE_CHANNEL_ID);
         if (!channel) return console.error("⚠️ Database channel not found!");
-        const messages = await channel.messages.fetch({ limit: 1 });
-        const jsonContent = "```json\n" + JSON.stringify(userData, null, 2) + "\n```";
-        if (messages.size === 0) {
-            // No messages in the database channel, create a new one
-            await channel.send(jsonContent);
-        } else {
-            const latestMessage = messages.first();
-            await latestMessage.edit(jsonContent);
+
+        // Convert the user data to a JSON string
+        const jsonContent = JSON.stringify(userData, null, 2);
+
+        // Split the JSON content into chunks of 1900 characters (to leave room for formatting)
+        const chunkSize = 1900;
+        const chunks = [];
+        for (let i = 0; i < jsonContent.length; i += chunkSize) {
+            chunks.push(jsonContent.slice(i, i + chunkSize));
         }
+
+        // Fetch existing messages in the database channel
+        const messages = await channel.messages.fetch({ limit: 100 });
+
+        // Delete old messages if they exist
+        if (messages.size > 0) {
+            await Promise.all(messages.map((msg) => msg.delete()));
+        }
+
+        // Send each chunk as a separate message
+        for (const chunk of chunks) {
+            await channel.send(`\`\`\`json\n${chunk}\n\`\`\``);
+        }
+
         console.log("✅ Saved user data to the database channel.");
     } catch (error) {
         console.error("⚠️ Error saving user data:", error);
