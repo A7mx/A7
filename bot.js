@@ -5,9 +5,6 @@ const {
     ActionRowBuilder,
     ButtonBuilder,
     ButtonStyle,
-    ModalBuilder,
-    TextInputBuilder,
-    TextInputStyle,
 } = require("discord.js");
 const express = require("express");
 require("dotenv").config();
@@ -106,8 +103,7 @@ client.on("voiceStateUpdate", async (oldState, newState) => {
     if ((!newState.channel && oldState.channel) && usersInVoice[userId]) {
         const timeSpent = (Date.now() - usersInVoice[userId]) / 1000;
         delete usersInVoice[userId];
-        if (timeSpent > 10) {
-            // Ignore if user left instantly
+        if (timeSpent > 10) { // Ignore if user left instantly
             if (!userData[userId]) {
                 userData[userId] = {
                     username,
@@ -118,7 +114,10 @@ client.on("voiceStateUpdate", async (oldState, newState) => {
             const today = new Date().toISOString().split("T")[0];
             userData[userId].total_time += timeSpent;
             userData[userId].history[today] = (userData[userId].history[today] || 0) + timeSpent;
+
+            // Save the updated user data to the database
             await saveUserData(userData);
+
             console.log(`🚪 ${username} left voice channel. Time added: ${Math.floor(timeSpent / 60)} min`);
         }
     }
@@ -137,104 +136,47 @@ async function showOwnerProfiles(interaction) {
         });
     }
 
-    // Add a search button
-    const searchButton = new ButtonBuilder()
-        .setCustomId("search_admin")
-        .setLabel("🔍 Search Admin")
-        .setStyle(ButtonStyle.Primary);
+    const userData = await fetchUserData();
 
-    const actionRow = new ActionRowBuilder().addComponents(searchButton);
-
-    // Create the embed
+    // Create an embed with profile pictures and buttons
     const embed = new EmbedBuilder()
         .setTitle("👥 A7 Admin Checker | By @A7madShooter")
-        .setDescription("Click the button below to search for an admin.")
+        .setDescription("Click on a user's name to view their voice activity stats.")
         .setColor("#0099ff");
+
+    const buttons = [];
+    membersWithRole.forEach((member) => {
+        const userId = member.id;
+        const displayName = member.nickname || member.user.username; // Use nickname if available, otherwise username
+        const isOnline = member.presence?.status === "online";
+
+        // Add a button for each owner
+        buttons.push(
+            new ButtonBuilder()
+                .setCustomId(`user_${userId}`)
+                .setLabel(displayName) // Use nickname or username
+                .setStyle(isOnline ? ButtonStyle.Success : ButtonStyle.Secondary)
+        );
+    });
+
+    // Split buttons into rows (max 5 buttons per row)
+    const actionRows = [];
+    for (let i = 0; i < buttons.length; i += 5) {
+        const row = new ActionRowBuilder().addComponents(buttons.slice(i, i + 5));
+        actionRows.push(row);
+    }
 
     await interaction.reply({
         embeds: [embed],
-        components: [actionRow],
-        flags: 64, // Ephemeral response
+        components: actionRows,
     });
 }
 
-// ✅ Handle interactions
+// ✅ Handle button clicks to show user stats
 client.on("interactionCreate", async (interaction) => {
-    if (!interaction.isButton() && !interaction.isModalSubmit()) return;
+    if (!interaction.isButton()) return;
 
     const customId = interaction.customId;
-
-    // Handle search button click
-    if (customId === "search_admin") {
-        const modal = new ModalBuilder()
-            .setCustomId("search_modal")
-            .setTitle("Search Admin");
-
-        const searchInput = new TextInputBuilder()
-            .setCustomId("search_query")
-            .setLabel("Enter a name or nickname to search:")
-            .setStyle(TextInputStyle.Short)
-            .setRequired(true);
-
-        const actionRow = new ActionRowBuilder().addComponents(searchInput);
-        modal.addComponents(actionRow);
-
-        await interaction.showModal(modal);
-    }
-
-    // Handle modal submission
-    if (interaction.isModalSubmit() && interaction.customId === "search_modal") {
-        const query = interaction.fields.getTextInputValue("search_query");
-        const guild = interaction.guild;
-
-        // Fetch members with the Owner role
-        const membersWithRole = guild.members.cache.filter((member) => member.roles.cache.has(OWNER_ROLE_ID));
-        const filteredMembers = Array.from(membersWithRole.values()).filter((member) => {
-            const displayName = member.nickname || member.user.username;
-            return displayName.toLowerCase().includes(query.toLowerCase());
-        });
-
-        if (filteredMembers.length === 0) {
-            return interaction.reply({
-                content: "❌ No matching admins found.",
-                flags: 64, // Ephemeral response
-            });
-        }
-
-        // Create buttons for the filtered members
-        const buttons = [];
-        filteredMembers.forEach((member) => {
-            const userId = member.id;
-            const displayName = member.nickname || member.user.username; // Use nickname if available, otherwise username
-            const isOnline = member.presence?.status === "online";
-
-            // Add a button for each matching admin
-            buttons.push(
-                new ButtonBuilder()
-                    .setCustomId(`user_${userId}`)
-                    .setLabel(displayName) // Use nickname or username
-                    .setStyle(isOnline ? ButtonStyle.Success : ButtonStyle.Secondary)
-            );
-        });
-
-        // Split buttons into rows (max 5 buttons per row)
-        const actionRows = [];
-        for (let i = 0; i < buttons.length; i += 5) {
-            const row = new ActionRowBuilder().addComponents(buttons.slice(i, i + 5));
-            actionRows.push(row);
-        }
-
-        const embed = new EmbedBuilder()
-            .setTitle("🔍 Search Results")
-            .setDescription(`Found ${filteredMembers.length} matching admins:`)
-            .setColor("#0099ff");
-
-        await interaction.reply({
-            embeds: [embed],
-            components: actionRows,
-            flags: 64, // Ephemeral response
-        });
-    }
 
     // Handle user profile button clicks
     if (customId.startsWith("user_")) {
@@ -249,7 +191,7 @@ client.on("interactionCreate", async (interaction) => {
             });
         }
 
-        // Create buttons for timeframes
+        // Create three new buttons for Day, Week, Month, and All Time
         const dayButton = new ButtonBuilder()
             .setCustomId(`day_${userId}`)
             .setLabel("📅 Day")
