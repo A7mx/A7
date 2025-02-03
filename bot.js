@@ -1,4 +1,14 @@
-const { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require("discord.js");
+const {
+    Client,
+    GatewayIntentBits,
+    EmbedBuilder,
+    ActionRowBuilder,
+    ButtonBuilder,
+    ButtonStyle,
+    ModalBuilder,
+    TextInputBuilder,
+    TextInputStyle,
+} = require("discord.js");
 const express = require("express");
 require("dotenv").config();
 const app = express();
@@ -96,8 +106,7 @@ client.on("voiceStateUpdate", async (oldState, newState) => {
     if ((!newState.channel && oldState.channel) && usersInVoice[userId]) {
         const timeSpent = (Date.now() - usersInVoice[userId]) / 1000;
         delete usersInVoice[userId];
-        if (timeSpent > 10) {
-            // Ignore if user left instantly
+        if (timeSpent > 10) { // Ignore if user left instantly
             if (!userData[userId]) {
                 userData[userId] = {
                     username,
@@ -115,7 +124,7 @@ client.on("voiceStateUpdate", async (oldState, newState) => {
 });
 
 // ✅ Create an embed with profile pictures of users with the Owner role
-async function showOwnerProfiles(interaction, page = 1) {
+async function showOwnerProfiles(interaction) {
     const guild = interaction.guild;
 
     // Fetch members with the Owner role using the role ID
@@ -127,78 +136,103 @@ async function showOwnerProfiles(interaction, page = 1) {
         });
     }
 
-    const pageSize = 25; // Maximum of 25 buttons per page
-    const totalPages = Math.ceil(membersWithRole.size / pageSize);
+    // Add a search button
+    const searchButton = new ButtonBuilder()
+        .setCustomId("search_admin")
+        .setLabel("🔍 Search Admin")
+        .setStyle(ButtonStyle.Primary);
 
-    // Calculate the members to display on the current page
-    const start = (page - 1) * pageSize;
-    const end = start + pageSize;
-    const pageMembers = Array.from(membersWithRole.values()).slice(start, end);
-
-    // Create buttons for the current page's owners
-    const buttons = [];
-    pageMembers.forEach((member) => {
-        const userId = member.id;
-        const displayName = member.nickname || member.user.username; // Use nickname if available, otherwise username
-        const isOnline = member.presence?.status === "online";
-
-        // Add a button for each owner
-        buttons.push(
-            new ButtonBuilder()
-                .setCustomId(`user_${userId}`)
-                .setLabel(displayName) // Use nickname or username
-                .setStyle(isOnline ? ButtonStyle.Success : ButtonStyle.Secondary)
-        );
-    });
-
-    // Split buttons into rows (max 5 buttons per row)
-    const actionRows = [];
-    for (let i = 0; i < buttons.length; i += 5) {
-        const row = new ActionRowBuilder().addComponents(buttons.slice(i, i + 5));
-        actionRows.push(row);
-    }
-
-    // Add pagination buttons
-    const prevButton = new ButtonBuilder()
-        .setCustomId("prev_page")
-        .setLabel("⬅️ Previous")
-        .setStyle(ButtonStyle.Primary)
-        .setDisabled(page === 1);
-
-    const nextButton = new ButtonBuilder()
-        .setCustomId("next_page")
-        .setLabel("➡️ Next")
-        .setStyle(ButtonStyle.Primary)
-        .setDisabled(page === totalPages);
-
-    const paginationRow = new ActionRowBuilder().addComponents(prevButton, nextButton);
+    const actionRow = new ActionRowBuilder().addComponents(searchButton);
 
     // Create the embed
     const embed = new EmbedBuilder()
         .setTitle("👥 A7 Admin Checker | By @A7madShooter")
-        .setDescription(`Click on a user's name to view their voice activity stats.\n*Page ${page} of ${totalPages}*`)
+        .setDescription("Click the button below to search for an admin.")
         .setColor("#0099ff");
 
     await interaction.reply({
         embeds: [embed],
-        components: [...actionRows, paginationRow],
+        components: [actionRow],
         flags: 64, // Ephemeral response
     });
 }
 
 // ✅ Handle interactions
 client.on("interactionCreate", async (interaction) => {
-    if (!interaction.isButton()) return;
+    if (!interaction.isButton() && !interaction.isModalSubmit()) return;
 
     const customId = interaction.customId;
 
-    // Handle pagination button clicks
-    if (customId === "prev_page" || customId === "next_page") {
-        const currentPage = parseInt(interaction.message.embeds[0].description.match(/Page (\d+)/)[1]);
-        const newPage = customId === "prev_page" ? currentPage - 1 : currentPage + 1;
-        await interaction.deferUpdate(); // Defer the reply to avoid errors
-        await showOwnerProfiles(interaction, newPage);
-        return;
+    // Handle search button click
+    if (customId === "search_admin") {
+        const modal = new ModalBuilder()
+            .setCustomId("search_modal")
+            .setTitle("Search Admin");
+
+        const searchInput = new TextInputBuilder()
+            .setCustomId("search_query")
+            .setLabel("Enter a name or nickname to search:")
+            .setStyle(TextInputStyle.Short)
+            .setRequired(true);
+
+        const actionRow = new ActionRowBuilder().addComponents(searchInput);
+        modal.addComponents(actionRow);
+
+        await interaction.showModal(modal);
+    }
+
+    // Handle modal submission
+    if (interaction.isModalSubmit() && interaction.customId === "search_modal") {
+        const query = interaction.fields.getTextInputValue("search_query");
+        const guild = interaction.guild;
+
+        // Fetch members with the Owner role
+        const membersWithRole = guild.members.cache.filter((member) => member.roles.cache.has(OWNER_ROLE_ID));
+        const filteredMembers = Array.from(membersWithRole.values()).filter((member) => {
+            const displayName = member.nickname || member.user.username;
+            return displayName.toLowerCase().includes(query.toLowerCase());
+        });
+
+        if (filteredMembers.length === 0) {
+            return interaction.reply({
+                content: "❌ No matching admins found.",
+                flags: 64, // Ephemeral response
+            });
+        }
+
+        // Create buttons for the filtered members
+        const buttons = [];
+        filteredMembers.forEach((member) => {
+            const userId = member.id;
+            const displayName = member.nickname || member.user.username; // Use nickname if available, otherwise username
+            const isOnline = member.presence?.status === "online";
+
+            // Add a button for each matching admin
+            buttons.push(
+                new ButtonBuilder()
+                    .setCustomId(`user_${userId}`)
+                    .setLabel(displayName) // Use nickname or username
+                    .setStyle(isOnline ? ButtonStyle.Success : ButtonStyle.Secondary)
+            );
+        });
+
+        // Split buttons into rows (max 5 buttons per row)
+        const actionRows = [];
+        for (let i = 0; i < buttons.length; i += 5) {
+            const row = new ActionRowBuilder().addComponents(buttons.slice(i, i + 5));
+            actionRows.push(row);
+        }
+
+        const embed = new EmbedBuilder()
+            .setTitle("🔍 Search Results")
+            .setDescription(`Found ${filteredMembers.length} matching admins:`)
+            .setColor("#0099ff");
+
+        await interaction.reply({
+            embeds: [embed],
+            components: actionRows,
+            flags: 64, // Ephemeral response
+        });
     }
 
     // Handle user profile button clicks
