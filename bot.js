@@ -6,9 +6,6 @@ const {
     ButtonBuilder,
     ButtonStyle,
     StringSelectMenuBuilder,
-    ModalBuilder,
-    TextInputBuilder,
-    TextInputStyle,
 } = require("discord.js");
 const express = require("express");
 require("dotenv").config();
@@ -141,48 +138,37 @@ async function showAdminProfiles(interaction) {
         });
     }
 
-    // Add a dropdown menu for admins
-    const selectMenu = new StringSelectMenuBuilder()
-        .setCustomId("admin_select_menu")
-        .setPlaceholder("Select an admin...")
-        .setMaxValues(1);
+    const userData = await fetchUserData();
 
-    // Add a button to open a modal
-    const modalButton = new ButtonBuilder()
-        .setCustomId("open_admin_modal")
-        .setLabel("🔍 View Admins in Modal")
-        .setStyle(ButtonStyle.Primary);
-
-    // Split members into chunks of 25 (max options per dropdown menu)
-    const memberChunks = [];
+    // Split admins into chunks of 25 (max options per dropdown menu)
+    const adminChunks = [];
     const membersArray = Array.from(membersWithRole.values());
     for (let i = 0; i < membersArray.length; i += 25) {
-        memberChunks.push(membersArray.slice(i, i + 25));
+        adminChunks.push(membersArray.slice(i, i + 25));
     }
 
-    // Add options to the dropdown menu
-    memberChunks[0].forEach((member) => {
-        const displayName = member.nickname || member.user.username;
-        selectMenu.addOptions({
-            label: displayName.substring(0, 100), // Ensure label doesn't exceed 100 characters
-            value: member.id,
+    // Send each chunk as a separate dropdown menu
+    for (const chunk of adminChunks) {
+        const selectMenu = new StringSelectMenuBuilder()
+            .setCustomId("admin_select_menu")
+            .setPlaceholder("Select an admin...")
+            .setMaxValues(1);
+
+        chunk.forEach((member) => {
+            const displayName = member.nickname || member.user.username;
+            selectMenu.addOptions({
+                label: displayName.substring(0, 100), // Ensure label doesn't exceed 100 characters
+                value: member.id,
+            });
         });
-    });
 
-    const actionRow1 = new ActionRowBuilder().addComponents(selectMenu);
-    const actionRow2 = new ActionRowBuilder().addComponents(modalButton);
+        const actionRow = new ActionRowBuilder().addComponents(selectMenu);
 
-    // Create the embed
-    const embed = new EmbedBuilder()
-        .setTitle("👥 A7 Admin Checker | By @A7madShooter")
-        .setDescription("Use the dropdown to select an admin or click the button to view them in a modal.")
-        .setColor("#0099ff");
-
-    await interaction.reply({
-        embeds: [embed],
-        components: [actionRow1, actionRow2],
-        flags: 64, // Ephemeral response
-    });
+        await interaction.channel.send({
+            content: "Please select an admin from the dropdown list:",
+            components: [actionRow],
+        });
+    }
 }
 
 // ✅ Handle interactions
@@ -238,43 +224,6 @@ client.on("interactionCreate", async (interaction) => {
             components: [actionRow],
             flags: 64, // Ephemeral response
         });
-    }
-
-    // Handle modal button click
-    if (customId === "open_admin_modal") {
-        const guild = interaction.guild;
-
-        // Fetch members with the Admin role
-        const membersWithRole = guild.members.cache.filter((member) => member.roles.cache.has(ADMIN_ROLE_ID));
-        if (membersWithRole.size === 0) {
-            return interaction.reply({
-                content: "❌ No members found with the Admin role.",
-                flags: 64, // Ephemeral response
-            });
-        }
-
-        // Create a modal
-        const modal = new ModalBuilder()
-            .setCustomId("admin_modal")
-            .setTitle("👥 Admin List");
-
-        // Add admin names and images to the modal
-        const adminList = membersWithRole.map((member) => {
-            const displayName = member.nickname || member.user.username;
-            const avatarURL = member.user.displayAvatarURL({ dynamic: true });
-            return `• **${displayName}**: ![${displayName}](${avatarURL})`;
-        }).join("\n");
-
-        const adminInput = new TextInputBuilder()
-            .setCustomId("admin_list_input")
-            .setLabel("Admins")
-            .setValue(adminList)
-            .setStyle(TextInputStyle.Paragraph);
-
-        const actionRow = new ActionRowBuilder().addComponents(adminInput);
-        modal.addComponents(actionRow);
-
-        await interaction.showModal(modal);
     }
 
     // Handle timeframe button clicks
