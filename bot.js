@@ -5,9 +5,8 @@ const {
     ActionRowBuilder,
     ButtonBuilder,
     ButtonStyle,
-    ModalBuilder,
-    TextInputBuilder,
-    TextInputStyle,
+    SlashCommandBuilder,
+    ApplicationCommandOptionType,
 } = require("discord.js");
 const express = require("express");
 require("dotenv").config();
@@ -124,152 +123,44 @@ client.on("voiceStateUpdate", async (oldState, newState) => {
     }
 });
 
-// ✅ Create an embed with profile pictures of users with the Owner role
-async function showOwnerProfiles(interaction) {
-    const guild = interaction.guild;
-
-    // Fetch members with the Owner role using the role ID
-    const membersWithRole = guild.members.cache.filter((member) => member.roles.cache.has(OWNER_ROLE_ID));
-    if (membersWithRole.size === 0) {
-        return interaction.reply({
-            content: "❌ No members found with the Owner role.",
-            flags: 64, // Ephemeral response
-        });
-    }
-
-    const userData = await fetchUserData();
-
-    // Create an embed with profile pictures and buttons
-    const embed = new EmbedBuilder()
-        .setTitle("👥 A7 Admin Checker | By @A7madShooter")
-        .setDescription("Click on a user's name to view their voice activity stats.")
-        .setColor("#0099ff");
-
-    const buttons = [];
-    membersWithRole.forEach((member) => {
-        const userId = member.id;
-        const displayName = member.nickname || member.user.username; // Use nickname if available, otherwise username
-        const isOnline = member.presence?.status === "online";
-
-        // Add a button for each owner
-        buttons.push(
-            new ButtonBuilder()
-                .setCustomId(`user_${userId}`)
-                .setLabel(displayName) // Use nickname or username
-                .setStyle(isOnline ? ButtonStyle.Success : ButtonStyle.Secondary)
-        );
-    });
-
-    // Split buttons into rows (max 5 buttons per row)
-    const actionRows = [];
-    for (let i = 0; i < buttons.length; i += 5) {
-        const row = new ActionRowBuilder().addComponents(buttons.slice(i, i + 5));
-        actionRows.push(row);
-    }
-
-    // Add a search button
-    const searchButton = new ButtonBuilder()
-        .setCustomId("search_admin")
-        .setLabel("🔍 Search Admin")
-        .setStyle(ButtonStyle.Primary);
-
-    const searchRow = new ActionRowBuilder().addComponents(searchButton);
-
-    await interaction.reply({
-        embeds: [embed],
-        components: [...actionRows, searchRow],
-        flags: 64, // Ephemeral response
-    });
-}
-
-// ✅ Handle interactions
+// ✅ Handle slash command for searching owners
 client.on("interactionCreate", async (interaction) => {
-    if (!interaction.isButton() && !interaction.isModalSubmit()) return;
+    if (!interaction.isCommand() && !interaction.isAutocomplete()) return;
 
-    const customId = interaction.customId;
+    const { commandName, options } = interaction;
 
-    // Handle search button click
-    if (customId === "search_admin") {
-        const modal = new ModalBuilder()
-            .setCustomId("search_modal")
-            .setTitle("Search Admin");
-
-        const searchInput = new TextInputBuilder()
-            .setCustomId("search_query")
-            .setLabel("Enter a name or nickname to search:")
-            .setStyle(TextInputStyle.Short)
-            .setRequired(true);
-
-        const actionRow = new ActionRowBuilder().addComponents(searchInput);
-        modal.addComponents(actionRow);
-
-        await interaction.showModal(modal);
-    }
-
-    // Handle modal submission
-    if (interaction.isModalSubmit() && interaction.customId === "search_modal") {
-        const query = interaction.fields.getTextInputValue("search_query");
+    // Handle autocomplete for the search command
+    if (interaction.isAutocomplete()) {
+        const focusedValue = interaction.options.getFocused();
         const guild = interaction.guild;
 
         // Fetch members with the Owner role
         const membersWithRole = guild.members.cache.filter((member) => member.roles.cache.has(OWNER_ROLE_ID));
-        const filteredMembers = Array.from(membersWithRole.values()).filter((member) => {
-            const displayName = member.nickname || member.user.username;
-            return displayName.toLowerCase().includes(query.toLowerCase());
-        });
+        const filteredMembers = Array.from(membersWithRole.values())
+            .filter((member) => {
+                const displayName = member.nickname || member.user.username;
+                return displayName.toLowerCase().includes(focusedValue.toLowerCase());
+            })
+            .map((member) => ({
+                name: member.nickname || member.user.username,
+                value: member.id,
+            }));
 
-        if (filteredMembers.length === 0) {
-            return interaction.reply({
-                content: "❌ No matching admins found.",
-                flags: 64, // Ephemeral response
-            });
-        }
-
-        // Create buttons for the filtered members
-        const buttons = [];
-        filteredMembers.forEach((member) => {
-            const userId = member.id;
-            const displayName = member.nickname || member.user.username; // Use nickname if available, otherwise username
-            const isOnline = member.presence?.status === "online";
-
-            // Add a button for each matching admin
-            buttons.push(
-                new ButtonBuilder()
-                    .setCustomId(`user_${userId}`)
-                    .setLabel(displayName) // Use nickname or username
-                    .setStyle(isOnline ? ButtonStyle.Success : ButtonStyle.Secondary)
-            );
-        });
-
-        // Split buttons into rows (max 5 buttons per row)
-        const actionRows = [];
-        for (let i = 0; i < buttons.length; i += 5) {
-            const row = new ActionRowBuilder().addComponents(buttons.slice(i, i + 5));
-            actionRows.push(row);
-        }
-
-        const embed = new EmbedBuilder()
-            .setTitle("🔍 Search Results")
-            .setDescription(`Found ${filteredMembers.length} matching admins:`)
-            .setColor("#0099ff");
-
-        await interaction.reply({
-            embeds: [embed],
-            components: actionRows,
-            flags: 64, // Ephemeral response
-        });
+        // Limit to 25 suggestions (Discord's maximum)
+        await interaction.respond(filteredMembers.slice(0, 25));
+        return;
     }
 
-    // Handle user profile button clicks
-    if (customId.startsWith("user_")) {
-        const userId = customId.split("_")[1];
+    // Handle the search command
+    if (commandName === "search") {
+        const userId = options.getString("name");
         const userData = await fetchUserData();
         const user = userData[userId];
 
         if (!user) {
             return interaction.reply({
                 content: "❌ No data found for this user.",
-                flags: 64, // Ephemeral response
+                ephemeral: true,
             });
         }
 
@@ -305,32 +196,34 @@ client.on("interactionCreate", async (interaction) => {
         await interaction.reply({
             embeds: [embed],
             components: [actionRow],
-            flags: 64, // Ephemeral response
+            ephemeral: true,
         });
     }
 
     // Handle timeframe button clicks
-    if (customId.startsWith("day_") || customId.startsWith("week_") ||
-        customId.startsWith("month_") || customId.startsWith("alltime_")) {
-        const userId = customId.split("_")[1];
+    if (interaction.isButton() && (interaction.customId.startsWith("day_") ||
+        interaction.customId.startsWith("week_") ||
+        interaction.customId.startsWith("month_") ||
+        interaction.customId.startsWith("alltime_"))) {
+        const userId = interaction.customId.split("_")[1];
         const userData = await fetchUserData();
         const user = userData[userId];
 
         if (!user) {
             return interaction.reply({
                 content: "❌ No data found for this user.",
-                flags: 64, // Ephemeral response
+                ephemeral: true,
             });
         }
 
         let timeframeLabel = "";
         let timeframeData = "";
 
-        if (customId.startsWith("day_")) {
+        if (interaction.customId.startsWith("day_")) {
             const today = new Date().toISOString().split("T")[0];
             timeframeLabel = "🕒 Today";
             timeframeData = formatTime(user.history[today] || 0);
-        } else if (customId.startsWith("week_")) {
+        } else if (interaction.customId.startsWith("week_")) {
             timeframeLabel = "📅 Weekly Breakdown";
             const today = new Date();
             let weeklyBreakdown = "";
@@ -343,10 +236,10 @@ client.on("interactionCreate", async (interaction) => {
                 weeklyBreakdown += `📆 **${dayName} (${day})**: ${dayTime}\n`;
             }
             timeframeData = weeklyBreakdown || "No data for the past 7 days.";
-        } else if (customId.startsWith("month_")) {
+        } else if (interaction.customId.startsWith("month_")) {
             timeframeLabel = "🗓️ This Month";
             timeframeData = formatTime(calculateMonthlyTime(user.history));
-        } else if (customId.startsWith("alltime_")) {
+        } else if (interaction.customId.startsWith("alltime_")) {
             timeframeLabel = "⏳ All Time";
             timeframeData = formatTime(user.total_time);
         }
@@ -360,7 +253,7 @@ client.on("interactionCreate", async (interaction) => {
 
         await interaction.reply({
             embeds: [embed],
-            flags: 64, // Ephemeral response
+            ephemeral: true,
         });
     }
 });
@@ -379,16 +272,24 @@ function calculateMonthlyTime(history) {
     return totalSeconds;
 }
 
-// ✅ Command to trigger the profile display
-client.on("messageCreate", async (message) => {
-    if (message.content === "!admin") {
-        await showOwnerProfiles(message);
-    }
-});
-
-// ✅ Start Bot
-client.once("ready", () => {
+// ✅ Register slash commands
+client.once("ready", async () => {
     console.log(`✅ Logged in as ${client.user.tag}`);
+
+    // Define the search command
+    const searchCommand = new SlashCommandBuilder()
+        .setName("search")
+        .setDescription("Search for an owner by name or nickname.")
+        .addStringOption((option) =>
+            option
+                .setName("name")
+                .setDescription("The name or nickname of the owner to search for.")
+                .setRequired(true)
+                .setAutocomplete(true)
+        );
+
+    // Register the command globally
+    await client.application.commands.create(searchCommand);
 });
 
 // ✅ Dummy Express server to satisfy Render's port requirement
