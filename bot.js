@@ -1,11 +1,17 @@
-const { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require("discord.js");
-const axios = require("axios");
+const { 
+    Client, 
+    GatewayIntentBits, 
+    EmbedBuilder, 
+    ActionRowBuilder, 
+    ButtonBuilder, 
+    ButtonStyle 
+} = require("discord.js");
 require("dotenv").config();
 const express = require("express");
 const app = express();
 const PORT = process.env.PORT || 10000;
 
-// 🔹 Discord Bot Initialization
+// 🔹 Initialize Discord client
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
@@ -24,22 +30,8 @@ const DATABASE_CHANNEL_ID = "1335732990323593246"; // For storing data
 // 🔹 Set the Admin Role ID
 const ADMIN_ROLE_ID = "1108295271101759499"; // Replace with the actual Admin role ID
 
-// 🔹 BattleMetrics Configuration
-const BOT_TOKEN = process.env.botToken;
-const WEBHOOK_URL = process.env.webhookUrl; // For cheater notifications
-const API_KEY = process.env.apiKey;
-const SERVER_ID = process.env.server_id1; // Server ID for Server #1
-
 // Track users currently in voice channels
 const usersInVoice = {};
-
-// Local caches for flagged players
-const flaggedPlayersCache = new Map(); // Tracks flagged players (key: playerId, value: notification message ID)
-
-// Rate limiting variables
-const MAX_API_CALLS_PER_MINUTE = 60; // Maximum allowed API calls per minute
-let apiCallCount = 0; // Tracks the total number of API calls made in the current minute
-let lastResetTime = Date.now(); // Tracks the last reset time for the global API call counter
 
 // ✅ Fetch or initialize user data from the database channel
 async function fetchUserData() {
@@ -181,7 +173,7 @@ async function showAdminProfiles(interaction) {
     });
 }
 
-// ✅ Handle interactions
+// ✅ Handle button clicks to show user stats
 client.on("interactionCreate", async (interaction) => {
     if (!interaction.isButton()) return;
 
@@ -313,254 +305,9 @@ client.on("messageCreate", async (message) => {
     }
 });
 
-// ✅ BattleMetrics: Enforce global rate limiting
-const enforceRateLimit = async () => {
-    const now = Date.now();
-    const resetInterval = 60000; // 1 minute in milliseconds
-    // Reset the counter if the interval has passed
-    if (now - lastResetTime >= resetInterval) {
-        apiCallCount = 0;
-        lastResetTime = now;
-    }
-    // Enforce rate limiting
-    if (apiCallCount >= MAX_API_CALLS_PER_MINUTE) {
-        console.log(`Reached the maximum API call limit (${MAX_API_CALLS_PER_MINUTE}/minute). Waiting...`);
-        await new Promise(resolve => setTimeout(resolve, resetInterval - (now - lastResetTime)));
-        apiCallCount = 0; // Reset the counter after waiting
-    }
-    apiCallCount++;
-};
-
-// ✅ BattleMetrics: Fetch all online players in the server
-const getOnlinePlayers = async () => {
-    let allPlayers = [];
-    let nextPage = `https://api.battlemetrics.com/players?filter[servers]=${SERVER_ID}&filter[online]=true&fields[player]=name&page[size]=100&sort=-updatedAt`;
-    try {
-        while (nextPage) {
-            await enforceRateLimit(); // Enforce rate limiting before making the API call
-            const response = await axios.get(nextPage, {
-                headers: {
-                    Authorization: `Bearer ${API_KEY}`,
-                },
-            });
-            if (!response.data || !response.data.data || response.data.data.length === 0) {
-                break;
-            }
-            allPlayers = allPlayers.concat(response.data.data);
-            nextPage = response.data.links?.next || null; // Check for next page
-        }
-        return allPlayers; // Return all players
-    } catch (error) {
-        console.error(`Error fetching players for Server #1:`, error.message);
-        return [];
-    }
-};
-
-// ✅ BattleMetrics: Fetch player flags for a specific player
-const getPlayerFlags = async (playerId) => {
-    const url = `https://api.battlemetrics.com/players/${playerId}`;
-    const headers = {
-        Authorization: `Bearer ${API_KEY}`,
-    };
-    const params = {
-        include: 'playerFlag',
-        'fields[playerFlag]': 'name,description',
-    };
-    try {
-        await enforceRateLimit(); // Enforce rate limiting before making the API call
-        const response = await axios.get(url, { headers, params });
-        if (!response.data || !response.data.included || response.data.included.length === 0) {
-            return [];
-        }
-        return response.data.included.filter(item => item.type === 'playerFlag');
-    } catch (error) {
-        console.error(`Error fetching player flags for player ID ${playerId}:`, error.message);
-        return [];
-    }
-};
-
-// ✅ BattleMetrics: Fetch detailed player information (including SteamID)
-const getPlayerDetails = async (playerId) => {
-    const url = `https://api.battlemetrics.com/players/${playerId}`;
-    const headers = {
-        Authorization: `Bearer ${API_KEY}`,
-    };
-    try {
-        await enforceRateLimit(); // Enforce rate limiting before making the API call
-        const response = await axios.get(url, { headers });
-        if (!response.data || !response.data.data) {
-            return null;
-        }
-        const playerData = response.data.data.attributes;
-        const identifiers = playerData.identifiers || []; // Extract identifiers array
-        const steamId = identifiers.find(id => id.startsWith('steam:')) || 'N/A'; // Find Steam ID
-        return { ...playerData, steamId };
-    } catch (error) {
-        console.error(`Error fetching player details for player ID ${playerId}:`, error.message);
-        return null;
-    }
-};
-
-// ✅ BattleMetrics: Send Discord notification for flagged players
-const sendDiscordNotification = async (playerName, playerId, flagName, flagDescription, steamProfileUrl, steamAvatarUrl, steamId) => {
-    const row = new ActionRowBuilder()
-        .addComponents(
-            new ButtonBuilder()
-                .setCustomId(`details_${playerId}`)
-                .setLabel('View Details')
-                .setStyle(ButtonStyle.Primary),
-            new ButtonBuilder()
-                .setCustomId(`dismiss_${playerId}`)
-                .setLabel('Dismiss')
-                .setStyle(ButtonStyle.Danger)
-        );
-    const data = {
-        embeds: [
-            {
-                title: `⚠️ Possible Cheater Detected on Server #1`,
-                description: `Player **${playerName}** has the flag: **${flagName}**.\n\nDescription: ${flagDescription}`,
-                url: steamProfileUrl, // Link to the player's Steam profile
-                thumbnail: {
-                    url: steamAvatarUrl || 'https://cdn.discordapp.com/embed/avatars/0.png', // Default avatar if none is provided
-                },
-                fields: [
-                    { name: 'Steam Profile', value: `[Click Here](${steamProfileUrl})`, inline: true },
-                    { name: 'Player ID', value: `\`${playerId}\``, inline: true },
-                    { name: 'SteamID', value: `\`${steamId}\``, inline: true }, // Include SteamID
-                ],
-                color: 16711680, // Red color for warnings
-                footer: {
-                    text: `Server #1 | Powered by A7 Servers`,
-                },
-            },
-        ],
-        components: [row],
-    };
-    try {
-        const response = await axios.post(WEBHOOK_URL, data);
-        if (response.status === 204) {
-            console.log(`Notification sent for player: ${playerName}`);
-            return response.headers['x-message-id']; // Return the message ID for tracking
-        }
-    } catch (error) {
-        console.error(`Failed to send Discord notification:`, error.message);
-    }
-};
-
-// ✅ BattleMetrics: Remove Discord notification for players who left the server
-const removeDiscordNotification = async (messageId) => {
-    const deleteUrl = `${WEBHOOK_URL}/messages/${messageId}`;
-    try {
-        await axios.delete(deleteUrl);
-        console.log(`Removed notification with message ID: ${messageId}`);
-    } catch (error) {
-        console.error(`Failed to remove notification with message ID ${messageId}:`, error.message);
-    }
-};
-
-// ✅ BattleMetrics: Check players and handle notifications for Server #1
-const checkPlayersForServer = async () => {
-    console.log(`Starting scan for all online players in Server #1...`);
-    const players = await getOnlinePlayers();
-    if (players.length === 0) {
-        console.log(`No online players to check for Server #1.`);
-        return;
-    }
-    console.log(`Processing ${players.length} online players in Server #1...`);
-    // Track current online players
-    const currentOnlinePlayers = new Set();
-    for (const player of players) {
-        const playerName = player.attributes.name;
-        const playerId = player.id;
-        const steamProfileUrl = player.attributes.profile || 'https://steamcommunity.com/'; // Default Steam profile URL
-        const steamAvatarUrl = player.attributes.avatar || 'https://cdn.discordapp.com/embed/avatars/0.png'; // Default avatar
-        const lastSeenTimestamp = player.attributes.lastSeen ? player.attributes.lastSeen * 1000 : Date.now(); // Convert to milliseconds or use current time
-        const lastSeen = new Date(lastSeenTimestamp);
-        console.log(`Checking player: ${playerName} (ID: ${playerId})`);
-        console.log(`Steam Profile: ${steamProfileUrl}`);
-        console.log(`Steam Avatar: ${steamAvatarUrl}`);
-        console.log(`Last Seen: ${lastSeen.toLocaleString()}`);
-        // Skip if the player was last seen more than 5 minutes ago (to avoid stale data)
-        const fiveMinutesAgo = Date.now() - 5 * 60 * 1000;
-        if (lastSeenTimestamp < fiveMinutesAgo) {
-            console.log(`Skipping player ${playerName} (ID: ${playerId}) due to stale data.`);
-            continue;
-        }
-        // Verify the player belongs to the specified server
-        const playerServerId = player.relationships?.server?.data?.id;
-        if (playerServerId !== SERVER_ID) {
-            console.log(`Skipping player ${playerName} (ID: ${playerId}) as they are not in the specified server.`);
-            continue;
-        }
-        // Add the player to the current online players set
-        currentOnlinePlayers.add(playerId);
-        // Skip if the player lacks required attributes
-        if (!playerName || !playerId) {
-            console.log(`Skipping player due to missing attributes: ${playerName} (ID: ${playerId})`);
-            continue;
-        }
-        const flags = await getPlayerFlags(playerId); // Call the getPlayerFlags function
-        if (flags.length > 0) {
-            for (const flag of flags) {
-                const flagName = flag.attributes.name;
-                const flagDescription = flag.attributes.description || 'No description provided.';
-                console.log(`Player ${playerName} on Server #1 has flag: ${flagName}`);
-                // Case-insensitive flag matching
-                if (flagName.trim().toLowerCase() === 'possible cheater') {
-                    // Fetch detailed player information (including SteamID)
-                    const playerDetails = await getPlayerDetails(playerId);
-                    const steamId = playerDetails?.steamId || 'N/A';
-                    // If the player is not already flagged, send a notification
-                    if (!flaggedPlayersCache.has(playerId)) {
-                        const messageId = await sendDiscordNotification(
-                            playerName,
-                            playerId,
-                            flagName,
-                            flagDescription,
-                            steamProfileUrl,
-                            steamAvatarUrl,
-                            steamId // Include SteamID in the notification
-                        );
-                        flaggedPlayersCache.set(playerId, messageId); // Store the player ID and message ID
-                        console.log(`Added player ${playerName} (ID: ${playerId}) to the flagged cache.`);
-                    }
-                }
-            }
-        }
-    }
-    // Identify players who are no longer online and remove their notifications
-    for (const [playerId, messageId] of flaggedPlayersCache.entries()) {
-        if (!currentOnlinePlayers.has(playerId)) {
-            await removeDiscordNotification(messageId);
-            flaggedPlayersCache.delete(playerId);
-            console.log(`Removed notification for player ID ${playerId} as they are no longer online.`);
-        }
-    }
-    console.log(`Finished scanning all players in Server #1.`);
-};
-
-// ✅ BattleMetrics: Periodically check players for Server #1
-const checkServers = async () => {
-    const now = Date.now();
-    const resetInterval = 60000; // 1 minute in milliseconds
-    // Reset the API call counter if the interval has passed
-    if (now - lastResetTime >= resetInterval) {
-        apiCallCount = 0;
-        lastResetTime = now;
-    }
-    // Check players for Server #1
-    await checkPlayersForServer();
-    // Stop checking if the global API call limit is reached
-    if (apiCallCount >= MAX_API_CALLS_PER_MINUTE) {
-        console.log(`Reached the maximum API call limit (${MAX_API_CALLS_PER_MINUTE}/minute). Pausing checks until the next minute.`);
-    }
-};
-
 // ✅ Start Bot
 client.once("ready", () => {
     console.log(`✅ Logged in as ${client.user.tag}`);
-    checkServers(); // Perform an initial check
-    setInterval(checkServers, 60 * 1000); // Check every minute
 });
 
 // ✅ Dummy Express server to satisfy Render's port requirement
@@ -572,6 +319,4 @@ app.listen(PORT, () => {
 });
 
 // Log in to Discord
-client.login(BOT_TOKEN).catch(error => {
-    console.error('Failed to log in to Discord:', error.message);
-});
+client.login(process.env.DISCORD_BOT_TOKEN);
