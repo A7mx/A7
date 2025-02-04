@@ -318,5 +318,8 @@ app.listen(PORT, () => {
     console.log(`🌐 Server is running on port ${PORT}`);
 });
 
-// Log in to Discord
-client.login(process.env.DISCORD_BOT_TOKEN);
+// Log in to Discord with hardcoded bot token
+const BOT_TOKEN = "YOUR_BOT_TOKEN_HERE"; // Replace with your actual bot token
+client.login(BOT_TOKEN).catch(error => {
+    console.error('Failed to log in to Discord:', error.message);
+});
